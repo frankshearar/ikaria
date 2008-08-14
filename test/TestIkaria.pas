@@ -82,6 +82,8 @@ type
   TestTTuple = class(TTestCase)
   private
     T: TTuple;
+
+    procedure ConstructTree(T: TTuple);
   public
     procedure SetUp; override;
     procedure TearDown; override;
@@ -94,18 +96,30 @@ type
     procedure TestAsStringEmptyTuple;
     procedure TestCopy;
     procedure TestEquals;
+    procedure TestEqualsOnTree;
   end;
 
   TestTActorMailbox = class(TTestCase)
   private
     Mbox: TActorMailbox;
     M:    TActorMessage;
+
+    function  AllFinder(Msg: TActorMessage): Boolean;
+    procedure CheckFound(ExpectedTag: String;
+                         Mbox: TActorMailbox;
+                         Condition: TMessageFinder;
+                         MsgPrefix: String);
+    function  NullFinder(Msg: TActorMessage): Boolean;
   public
     procedure SetUp; override;
     procedure TearDown; override;
   published
-    procedure TestAddMessage;
+    procedure TestAddMessageAndIsEmpty;
+    procedure TestFindMessageEmptyMailbox;
+    procedure TestFindMessageReturnsFirstMatch;
+    procedure TestFindMessageStoredMessagesInSaveQueue;
     procedure TestPurge;
+    procedure TestTimeoutRestoresSaveQueueMessages;
   end;
 
   TestTActor = class(TTestCase)
@@ -503,6 +517,23 @@ begin
   inherited TearDown;
 end;
 
+//* TestTTuple Private methods *************************************************
+
+procedure TestTTuple.ConstructTree(T: TTuple);
+var
+  Subtree: TTuple;
+begin
+  // As an S-expression, this is '("tree" ("leaf"))
+  Subtree := TTuple.Create;
+  try
+    T.AddString('tree');
+    Subtree.AddString('leaf');
+    T.Add(Subtree);
+  finally
+    Subtree.Free;
+  end;
+end;
+
 //* TestTTuple Published methods ***********************************************
 
 procedure TestTTuple.TestAdd;
@@ -518,6 +549,7 @@ begin
     Self.T.Add(B);
     CheckEquals(1, Self.T.Count, 'Boolean not added');
     CheckEquals(B.ClassType, Self.T[0].ClassType, 'Element of wrong type added (Boolean)');
+    Check(B <> Self.T[0], 'Element not copied (Boolean)');
   finally
     B.Free;
   end;
@@ -526,7 +558,8 @@ begin
   try
     Self.T.Add(I);
     CheckEquals(2, Self.T.Count, 'Integer not added');
-    CheckEquals(B.ClassType, Self.T[1].ClassType, 'Element of wrong type added (Integer)');
+    CheckEquals(I.ClassType, Self.T[1].ClassType, 'Element of wrong type added (Integer)');
+    Check(I <> Self.T[1], 'Element not copied (Integer)');
   finally
     I.Free;
   end;
@@ -535,7 +568,8 @@ begin
   try
     Self.T.Add(S);
     CheckEquals(3, Self.T.Count, 'String not added');
-    CheckEquals(B.ClassType, Self.T[2].ClassType, 'Element of wrong type added (String)');
+    CheckEquals(S.ClassType, Self.T[2].ClassType, 'Element of wrong type added (String)');
+    Check(S <> Self.T[2], 'Element not copied (String)');
   finally
     S.Free;
   end;
@@ -601,7 +635,7 @@ var
   C: TTuple;
   I: Integer;
 begin
-  C := Self.T.Copy;
+  C := Self.T.Copy as TTuple;
   try
     CheckEquals(Self.T.Count, C.Count, 'Incorrect number of elements');
 
@@ -615,23 +649,53 @@ end;
 procedure TestTTuple.TestEquals;
 var
   Different: TTuple;
-  Same: TTuple;
+  Same:      TTuple;
 begin
   Different := TTuple.Create;
   try
+    Different.AddInteger(999);
+
     Check(not Different.Equals(Self.T), 'Different = T');
     Check(not Self.T.Equals(Different), 'T = Different');
   finally
     Different.Free;
   end;
 
-  Same := Self.T.Copy;
+  Same := Self.T.Copy as TTuple;
   try
     Check(Same.Equals(Self.T), 'Same <> T');
     Check(Self.T.Equals(Same), 'T <> Same');
   finally
     Same.Free;
-  end;         
+  end;
+end;
+
+procedure TestTTuple.TestEqualsOnTree;
+var
+  Different: TTuple;
+  Same:      TTuple;
+begin
+  Self.ConstructTree(Self.T);
+
+  Different := TTuple.Create;
+  try
+    Different.AddInteger(999);
+
+    Check(not Different.Equals(Self.T), 'Different = T');
+    Check(not Self.T.Equals(Different), 'T = Different');
+  finally
+    Different.Free;
+  end;
+
+  Same := TTuple.Create;
+  try
+    Self.ConstructTree(Same);
+
+    Check(Same.Equals(Self.T), 'Same <> T');
+    Check(Self.T.Equals(Same), 'T <> Same');
+  finally
+    Same.Free;
+  end;
 end;
 
 //******************************************************************************
@@ -655,18 +719,140 @@ begin
   inherited TearDown;
 end;
 
-procedure TestTActorMailbox.TestAddMessage;
+//* TestTActorMailbox Private methods ******************************************
+
+function TestTActorMailbox.AllFinder(Msg: TActorMessage): Boolean;
+begin
+  Result := true;
+end;
+
+procedure TestTActorMailbox.CheckFound(ExpectedTag: String;
+                                       Mbox: TActorMailbox;
+                                       Condition: TMessageFinder;
+                                       MsgPrefix: String);
+var
+  Found: TActorMessage;
+begin
+  Found := Mbox.FindMessage(Condition);
+  try
+    Check(Found <> nil, MsgPrefix + ': No message found');
+    CheckEquals(ExpectedTag, Found.Tag, MsgPrefix + ': Wrong message found');
+  finally
+    Found.Free;
+  end;
+end;
+
+function TestTActorMailbox.NullFinder(Msg: TActorMessage): Boolean;
+begin
+  Result := false;
+end;
+
+//* TestTActorMailbox Published methods ****************************************
+
+procedure TestTActorMailbox.TestAddMessageAndIsEmpty;
 begin
   Check(Self.MBox.IsEmpty, 'New mailbox isn''t empty');
-  Self.MBox.AddMessage(M);
+  Self.MBox.AddMessage(Self.M);
   Check(not Self.MBox.IsEmpty, 'Mailbox didn''t store the message');
+end;
+
+procedure TestTActorMailbox.TestFindMessageEmptyMailbox;
+var
+  Found: TActorMessage;
+begin
+  Found := Self.MBox.FindMessage(Self.AllFinder);
+  try
+    Check(nil = Found, 'Message found... in an empty mailbox');
+  finally
+    Found.Free;
+  end;
+end;
+
+procedure TestTActorMailbox.TestFindMessageReturnsFirstMatch;
+var
+  M2: TActorMessage;
+begin
+  M2 := TActorMessage.Create;
+  try
+    Self.MBox.AddMessage(Self.M);
+    Self.MBox.AddMessage(M2);
+
+    CheckFound(Self.M.Tag, Self.Mbox, Self.AllFinder, 'First time');
+    CheckFound(M2.Tag,     Self.Mbox, Self.AllFinder, 'Second time');
+  finally
+    M2.Free;
+  end;
+end;
+
+procedure TestTActorMailbox.TestFindMessageStoredMessagesInSaveQueue;
+var
+  M2: TActorMessage;
+  M3: TActorMessage;
+begin
+  // If there's a message in the mailbox that matches none of our conditions,
+  // then that message is stored in the "save queue" until such time as a new
+  // message arrives in the mailbox. Thus, unmatched messages will not be
+  // continually rechecked by a Receive.
+
+  M2 := TActorMessage.Create;
+  try
+    Self.MBox.AddMessage(Self.M);
+    Self.MBox.AddMessage(M2);
+
+    Check(nil = Self.Mbox.FindMessage(Self.NullFinder), 'Message erroneously found');
+
+    Check(nil = Self.Mbox.FindMessage(Self.AllFinder), 'Already-checked messages not moved to the save queue');
+
+    M3 := TActorMessage.Create;
+    try
+      Self.Mbox.AddMessage(M3);
+
+      CheckFound(M3.Tag, Self.MBox, Self.AllFinder, 'Saved messages are added on the end of the mailbox');
+      CheckFound(Self.M.Tag, Self.MBox, Self.AllFinder, 'Saved messages should be re-added to the mailbox for matching');
+    finally
+      M3.Free;
+    end;
+  finally
+    M2.Free;
+  end;
 end;
 
 procedure TestTActorMailbox.TestPurge;
 begin
-  Self.MBox.AddMessage(M);
+  Self.MBox.AddMessage(Self.M);
   Self.MBox.Purge;
   Check(Self.MBox.IsEmpty, 'Mailbox didn''t purge the message');
+end;
+
+procedure TestTActorMailbox.TestTimeoutRestoresSaveQueueMessages;
+var
+  M2: TActorMessage;
+  M3: TActorMessage;
+begin
+  // If an actor times out waiting for a message that matches some condition,
+  // then all the messages in the save queue are re-added to the mailbox, in
+  // their arrival order.
+
+  M2 := TActorMessage.Create;
+  try
+    Self.MBox.AddMessage(Self.M);
+    Self.MBox.AddMessage(M2);
+
+    Check(nil = Self.Mbox.FindMessage(Self.NullFinder), 'Message erroneously found');
+
+    Check(nil = Self.Mbox.FindMessage(Self.AllFinder), 'Already-checked messages not moved to the save queue');
+
+    M3 := TActorMessage.Create;
+    try
+      Self.Mbox.Timeout;
+
+      CheckFound(Self.M.Tag, Self.MBox, Self.AllFinder, 'Saved messages should be re-added to the mailbox for matching');
+    finally
+      M3.Free;
+    end;
+  finally
+    M2.Free;
+  end;
 end;
 
 //******************************************************************************

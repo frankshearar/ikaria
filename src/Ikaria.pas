@@ -83,7 +83,7 @@ type
     procedure AddInteger(I: Integer);
     procedure AddString(S: String);
     function  AsString: String; override;
-    function  Copy: TTuple; override;
+    function  Copy: TTupleElement; override;
     function  Count: Integer;
     function  Equals(Other: TTupleElement): Boolean; override;
 
@@ -109,23 +109,30 @@ type
 
   TMessageFinder = function(Msg: TActorMessage): Boolean of object;
 
+  TActOnMessage = procedure(Msg: TActorMessage) of object;
+
   // I store messages sent to an Actor.
   TActorMailbox = class(TObject)
   private
-    Lock:     TCriticalSection;
-    Messages: TObjectList;
+    Lock:      TCriticalSection;
+    Messages:  TObjectList;
+    SaveQueue: TObjectList;
+
+    procedure FreeMessage(L: TObjectList; M: TActorMessage);
+    procedure FreeMessages(L: TObjectList);
+    function  MessageAt(Index: Integer): TActorMessage;
+    procedure MoveMessages(Src, Dest: TObjectList; FromIndex, ToIndex: Integer);
+    procedure RestoreSaveQueue;
   public
     constructor Create;
     destructor  Destroy; override;
 
     procedure AddMessage(Msg: TActorMessage);
     function  IsEmpty: Boolean;
-    function  FindMessage(Condition: TMessageFinder): TActorMessage;
-    function  ExtractMessage(Condition: TMessageFinder): TActorMessage;
+    function  FindMessage(Condition: TMessageFinder): TActorMessage; overload;
     procedure Purge;
+    procedure Timeout;
   end;
-
-  TActOnMessage = procedure(Msg: TActorMessage) of object;
 
   // I represent an execution context. I send and receive messages to and from
   // other Actors.
@@ -138,7 +145,7 @@ type
     ParentID: TProcessID;
 
     procedure Execute; override;
-    procedure Receive(Matching: TMessageFinder; Action: TActOnMessage; Timeout: Cardinal = 0);
+    procedure Receive(Matching: TMessageFinder; Action: TActOnMessage; Timeout: Cardinal = 0); overload;
     procedure Run; virtual;
     procedure Send(Target: TProcessID; Msg: TActorMessage);
     function  Spawn(ActorType: TActorClass): TProcessID;
@@ -191,6 +198,11 @@ var
   SendLock:  TCriticalSection; // Used to synchronise the sending of messages to mailboxes.
   UsedPIDs:  TStringList;
 
+// Tag generation
+var
+  NextAvailableTag: Int64;
+  TagLock: TCriticalSection;
+
 //******************************************************************************
 //* Unit Private functions/procedures                                          *
 //******************************************************************************
@@ -219,6 +231,18 @@ begin
     UsedPIDs.Add(Result);
   finally
     ActorLock.Release;
+  end;
+end;
+
+function NextTag: String;
+begin
+  // For now, tags start at 0 and increment up.
+  TagLock.Acquire;
+  try
+    Result := IntToStr(NextAvailableTag);
+    Inc(NextAvailableTag);
+  finally
+    TagLock.Release;
   end;
 end;
 
@@ -478,14 +502,17 @@ begin
   Result := Trim(Result) + ')'
 end;
 
-function TTuple.Copy: TTuple;
+function TTuple.Copy: TTupleElement;
 var
   I: Integer;
+  NewT: TTuple;
 begin
-  Result := TTuple.Create;
+  NewT := TTuple.Create;
 
   for I := 0 to Self.Count - 1 do
-    Result.Add(Self[I]); 
+    NewT.Add(Self[I]);
+
+  Result := NewT;
 end;
 
 function TTuple.Count: Integer;
@@ -494,8 +521,22 @@ begin
 end;
 
 function TTuple.Equals(Other: TTupleElement): Boolean;
+var
+  I:          Integer;
+  OtherTuple: TTuple;
 begin
-  Result := false;
+  Result := inherited Equals(Other);
+
+  if Result then begin
+    OtherTuple := Other as TTuple;
+
+    Result := Self.Count = OtherTuple.Count;
+
+    if Result then begin
+      for I := 0 to Self.Count - 1 do
+        Result := Result and Self[I].Equals(OtherTuple[I]);
+    end;
+  end;
 end;
 
 //* TTuple Private methods *****************************************************
@@ -515,6 +556,7 @@ begin
   inherited Create;
 
   Self.fData := TTuple.Create;
+  Self.fTag  := NextTag;
 end;
 
 destructor TActorMessage.Destroy;
@@ -537,7 +579,7 @@ end;
 function TActorMessage.Copy: TActorMessage;
 begin
   Result := TActorMessage.Create;
-  Result.fData := Self.Data.Copy;
+  Result.fData := Self.Data.Copy as TTuple;
   Result.fTag  := Self.Tag;
 end;
 
@@ -551,13 +593,16 @@ begin
   inherited Create;
 
   Self.Lock     := TCriticalSection.Create;
-  Self.Messages := TObjectList.Create(true);
+  Self.Messages := TObjectList.Create(false);
+  Self.SaveQueue := TObjectList.Create(false);
 end;
 
 destructor TActorMailbox.Destroy;
 begin
   Self.Lock.Acquire;
   try
+    Self.Purge;
+    Self.SaveQueue.Free;
     Self.Messages.Free;
   finally
     Self.Lock.Release;
@@ -569,11 +614,14 @@ end;
 
 procedure TActorMailbox.AddMessage(Msg: TActorMessage);
 begin
-  // Store a copy of Msg in our buffer.
+  // Store a copy of Msg in our mailbox.
+  // Move any messages in the save queue back into the mailbox proper (preserving arrival order).
 
   Self.Lock.Acquire;
   try
     Self.Messages.Add(Msg.Copy);
+
+    Self.RestoreSaveQueue;
   finally
     Self.Lock.Release;
   end;
@@ -590,13 +638,33 @@ begin
 end;
 
 function TActorMailbox.FindMessage(Condition: TMessageFinder): TActorMessage;
+var
+  FoundIndex: Integer;
+  I:          Integer;
+  M:          TActorMessage;
 begin
-  // Return the first message satisfying Condition.
-end;
+  // Return the first matching message, and remove it from the mailbox.
+  // Move all non-matching-but-checked messages to the save queue (preserving arrival order).
 
-function TActorMailbox.ExtractMessage(Condition: TMessageFinder): TActorMessage;
-begin
-  // Return the first matching message, and remove it from our buffer.
+  Self.Lock.Acquire;
+  try
+    Result := nil;
+
+    FoundIndex := Self.Messages.Count;
+    for I := 0 to Self.Messages.Count - 1 do begin
+      M := Self.MessageAt(I);
+
+      if Condition(M) then begin
+        FoundIndex := I;
+        Result := M.Copy;
+        Self.FreeMessage(Self.Messages, M);
+        Break;
+      end;
+    end;
+    Self.MoveMessages(Self.Messages, Self.SaveQueue, 0, FoundIndex - 1);
+  finally
+    Self.Lock.Release;
+  end;
 end;
 
 procedure TActorMailbox.Purge;
@@ -605,12 +673,62 @@ begin
 
   Self.Lock.Acquire;
   try
-    Self.Messages.Clear;
+    Self.FreeMessages(Self.Messages);
+    Self.FreeMessages(Self.SaveQueue);
   finally
     Self.Lock.Release;
   end;
 end;
 
+procedure TActorMailbox.Timeout;
+begin
+  // Call this method when you've timed out waiting for a message.
+  // Move any messages in the save queue back into the mailbox proper (preserving arrival order).
+
+  Self.Lock.Acquire;
+  try
+    Self.RestoreSaveQueue;
+  finally
+    Self.Lock.Release;
+  end;
+end;
+
+//* TActorMailbox Private methods **********************************************
+
+procedure TActorMailbox.FreeMessage(L: TObjectList; M: TActorMessage);
+begin
+  L.Remove(M);
+  M.Free;
+end;
+
+procedure TActorMailbox.FreeMessages(L: TObjectList);
+begin
+  while L.Count > 0 do begin
+    L[0].Free;
+    L.Delete(0);
+  end;
+end;
+
+function TActorMailbox.MessageAt(Index: Integer): TActorMessage;
+begin
+  Result := Self.Messages[Index] as TActorMessage;
+end;
+
+procedure TActorMailbox.MoveMessages(Src, Dest: TObjectList; FromIndex, ToIndex: Integer);
+var
+  I: Integer;
+begin
+  for I := FromIndex to ToIndex do
+    Dest.Add(Src[I]);
+
+  for I := FromIndex to ToIndex do
+    Src.Delete(FromIndex);
+end;
+
+procedure TActorMailbox.RestoreSaveQueue;
+begin
+  Self.MoveMessages(Self.SaveQueue, Self.Messages, 0, Self.SaveQueue.Count - 1);
+end;
 
 //******************************************************************************
 //* TActor                                                                     *
@@ -690,10 +808,13 @@ begin
 
   while not Self.Terminated do begin
     Msg := Self.Mailbox.FindMessage(Matching);
-
-    if Assigned(Msg) then begin
-      Action(Msg);
-      Break;
+    try
+      if Assigned(Msg) then begin
+        Action(Msg);
+        Break;
+      end;
+    finally
+      Msg.Free;
     end;
 
     // Wait a bit.
@@ -739,4 +860,8 @@ initialization
   Actors    := TStringList.Create;
   SendLock  := TCriticalSection.Create;
   UsedPIDs  := TStringList.Create;
+
+  // Tag generation
+  NextAvailableTag := 0;
+  TagLock          := TCriticalSection.Create;
 end.
