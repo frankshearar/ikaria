@@ -86,12 +86,14 @@ type
     procedure SetUp; override;
     procedure TearDown; override;
   published
+    procedure TestAdd;
     procedure TestAddBoolean;
     procedure TestAddInteger;
     procedure TestAddString;
     procedure TestAsString;
     procedure TestAsStringEmptyTuple;
     procedure TestCopy;
+    procedure TestEquals;
   end;
 
   TestTActorMailbox = class(TTestCase)
@@ -503,6 +505,42 @@ end;
 
 //* TestTTuple Published methods ***********************************************
 
+procedure TestTTuple.TestAdd;
+var
+  B: TBooleanElement;
+  I: TIntegerElement;
+  S: TStringElement;
+begin
+  CheckEquals(0, Self.T.Count, 'Sanity check: T should have no elements');
+
+  B := TBooleanElement.Create(true);
+  try
+    Self.T.Add(B);
+    CheckEquals(1, Self.T.Count, 'Boolean not added');
+    CheckEquals(B.ClassType, Self.T[0].ClassType, 'Element of wrong type added (Boolean)');
+  finally
+    B.Free;
+  end;
+
+  I := TIntegerElement.Create(42);
+  try
+    Self.T.Add(I);
+    CheckEquals(2, Self.T.Count, 'Integer not added');
+    CheckEquals(B.ClassType, Self.T[1].ClassType, 'Element of wrong type added (Integer)');
+  finally
+    I.Free;
+  end;
+
+  S := TStringElement.Create('hello');
+  try
+    Self.T.Add(S);
+    CheckEquals(3, Self.T.Count, 'String not added');
+    CheckEquals(B.ClassType, Self.T[2].ClassType, 'Element of wrong type added (String)');
+  finally
+    S.Free;
+  end;
+end;
+
 procedure TestTTuple.TestAddBoolean;
 begin
   Self.T.AddBoolean(true);
@@ -572,6 +610,28 @@ begin
   finally
     C.Free;
   end;
+end;
+
+procedure TestTTuple.TestEquals;
+var
+  Different: TTuple;
+  Same: TTuple;
+begin
+  Different := TTuple.Create;
+  try
+    Check(not Different.Equals(Self.T), 'Different = T');
+    Check(not Self.T.Equals(Different), 'T = Different');
+  finally
+    Different.Free;
+  end;
+
+  Same := Self.T.Copy;
+  try
+    Check(Same.Equals(Self.T), 'Same <> T');
+    Check(Self.T.Equals(Same), 'T <> Same');
+  finally
+    Same.Free;
+  end;         
 end;
 
 //******************************************************************************

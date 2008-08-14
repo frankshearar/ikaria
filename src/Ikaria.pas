@@ -69,7 +69,7 @@ type
     property Value: String read fValue;
   end;
 
-  TTuple = class(TObject)
+  TTuple = class(TTupleElement)
   private
     TupleElements: TObjectList;
 
@@ -82,9 +82,10 @@ type
     procedure AddBoolean(B: Boolean);
     procedure AddInteger(I: Integer);
     procedure AddString(S: String);
-    function  AsString: String;
-    function  Copy: TTuple;
+    function  AsString: String; override;
+    function  Copy: TTuple; override;
     function  Count: Integer;
+    function  Equals(Other: TTupleElement): Boolean; override;
 
     property Elements[Index: Integer]: TTupleElement read GetElement; default;
   end;
@@ -124,7 +125,7 @@ type
     procedure Purge;
   end;
 
-  TActOnMessage  = procedure(Msg: TActorMessage) of object;
+  TActOnMessage = procedure(Msg: TActorMessage) of object;
 
   // I represent an execution context. I send and receive messages to and from
   // other Actors.
@@ -447,6 +448,7 @@ end;
 
 procedure TTuple.Add(E: TTupleElement);
 begin
+  Self.TupleElements.Add(E.Copy);
 end;
 
 procedure TTuple.AddBoolean(B: Boolean);
@@ -489,6 +491,11 @@ end;
 function TTuple.Count: Integer;
 begin
   Result := Self.TupleElements.Count;
+end;
+
+function TTuple.Equals(Other: TTupleElement): Boolean;
+begin
+  Result := false;
 end;
 
 //* TTuple Private methods *****************************************************
