@@ -95,6 +95,7 @@ type
     procedure TestAdd;
     procedure TestAddBoolean;
     procedure TestAddInteger;
+    procedure TestAddProcessID;
     procedure TestAddString;
     procedure TestAsString;
     procedure TestAsStringEmptyTuple;
@@ -128,6 +129,27 @@ type
     procedure TestNotifyOfNewMessages;
     procedure TestPurge;
     procedure TestTimeoutRestoresSaveQueueMessages;
+  end;
+
+  TestTActorMessageTable = class(TTestCase)
+  private
+    FirstActionWorked:     Boolean;
+    SecondActionWorked:    Boolean;
+    FirstConditionWorked:  Boolean;
+    SecondConditionWorked: Boolean;
+    T:                     TActorMessageTable;
+    TestMsg:               TActorMessage;
+
+    procedure FirstAction(Msg: TActorMessage);
+    function  FirstTestCondition(Msg: TActorMessage): Boolean;
+    procedure SecondAction(Msg: TActorMessage);
+    function  SecondTestCondition(Msg: TActorMessage): Boolean;
+  public
+    procedure SetUp; override;
+    procedure TearDown; override;
+  published
+    procedure TestAddAndCount;
+    procedure TestAccessors;
   end;
 
   TestTActor = class(TTestCase)
@@ -184,6 +206,7 @@ begin
   Result.AddSuite(TestTStringElement.Suite);
   Result.AddSuite(TestTTuple.Suite);
   Result.AddSuite(TestTActorMailbox.Suite);
+  Result.AddSuite(TestTActorMessageTable.Suite);
   Result.AddSuite(TestTActor.Suite);
 end;
 
@@ -216,13 +239,15 @@ end;
 
 procedure TSingleShotActor.Run;
 var
-  M: TActorMessage;
+  Ping: TTuple;
 begin
-  M := TActorMessage.Create;
+  Ping := TTuple.Create;
   try
-    Self.Send(Self.ParentID, M);
+    Ping.AddProcessID(Self.PID);
+    Ping.AddString('ping');
+    Self.Send(Self.ParentID, Ping);
   finally
-    M.Free;
+    Ping.Free;
   end;
 end;
 
@@ -629,6 +654,19 @@ begin
   CheckEquals(1, TIntegerElement(Self.T[1]).Value, 'Second element value');
 end;
 
+procedure TestTTuple.TestAddProcessID;
+begin
+  Self.T.AddProcessID('dd3e05ec-60a4-4f57-9c3e-f8897b66497b');
+  Self.T.AddProcessID('04aa000f-edb4-4b58-9f9d-c9b1138d485f');
+
+  CheckEquals(2, Self.T.Count, 'Incorrect number of elements');
+  CheckEquals(TProcessIDElement.ClassName, Self.T[0].ClassName, 'First element type');
+  CheckEquals(TProcessIDElement.ClassName, Self.T[1].ClassName, 'Second element type');
+
+  CheckEquals('dd3e05ec-60a4-4f57-9c3e-f8897b66497b', TProcessIDElement(Self.T[0]).Value, 'First element value');
+  CheckEquals('04aa000f-edb4-4b58-9f9d-c9b1138d485f', TProcessIDElement(Self.T[1]).Value, 'Second element value');
+end;
+
 procedure TestTTuple.TestAddString;
 begin
   Self.T.AddString('ping');
@@ -903,6 +941,87 @@ begin
   finally
     M2.Free;
   end;
+end;
+
+//******************************************************************************
+//* TestTActorMessageTable                                                     *
+//******************************************************************************
+//* TestTActorMessageTable Public methods **************************************
+
+procedure TestTActorMessageTable.SetUp;
+begin
+  inherited SetUp;
+
+  Self.T := TActorMessageTable.Create;
+  Self.TestMsg := TActorMessage.Create;
+
+  Self.FirstActionWorked     := false;
+  Self.SecondActionWorked    := false;
+  Self.FirstConditionWorked  := false;
+  Self.SecondConditionWorked := false;
+end;
+
+procedure TestTActorMessageTable.TearDown;
+begin
+  Self.TestMsg.Free;
+  Self.T.Free;
+
+  inherited TearDown;
+end;
+
+//* TestTActorMessageTable Private methods *************************************
+
+procedure TestTActorMessageTable.FirstAction(Msg: TActorMessage);
+begin
+  Self.FirstActionWorked := true;
+end;
+
+function TestTActorMessageTable.FirstTestCondition(Msg: TActorMessage): Boolean;
+begin
+  Result := false;
+  Self.FirstConditionWorked := true;
+end;
+
+procedure TestTActorMessageTable.SecondAction(Msg: TActorMessage);
+begin
+  Self.SecondActionWorked := true;
+end;
+
+function TestTActorMessageTable.SecondTestCondition(Msg: TActorMessage): Boolean;
+begin
+  Result := false;
+  Self.SecondConditionWorked := true;
+end;
+
+//* TestTActorMessageTable Published methods **************************************
+
+procedure TestTActorMessageTable.TestAddAndCount;
+begin
+  CheckEquals(0, Self.T.Count, 'Empty table');
+
+  Self.T.Add(Self.FirstTestCondition, Self.FirstAction);
+  CheckEquals(1, Self.T.Count, 'No condition/action pair added');
+
+  Self.T.Add(Self.SecondTestCondition, Self.SecondAction);
+  CheckEquals(2, Self.T.Count, 'No second condition/action pair added');
+end;
+
+procedure TestTActorMessageTable.TestAccessors;
+begin
+  Self.T.Add(Self.FirstTestCondition, Self.FirstAction);
+  Self.T.Add(Self.SecondTestCondition, Self.SecondAction);
+
+  Self.T.Actions[0](Self.TestMsg);
+  Check(Self.FirstActionWorked, 'Actions[0] returned an unexpected method');
+
+  Self.T.Actions[1](Self.TestMsg);
+  Check(Self.SecondActionWorked, 'Actions[1] returned an unexpected method');
+
+  Self.T.Conditions[0](Self.TestMsg);
+  Check(Self.FirstConditionWorked, 'Conditions[0] returned an unexpected method');
+
+  Self.T.Conditions[1](Self.TestMsg);
+  Check(Self.SecondConditionWorked, 'Conditions[1] returned an unexpected method');
 end;
 
 //******************************************************************************

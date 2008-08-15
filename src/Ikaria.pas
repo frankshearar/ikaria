@@ -81,6 +81,7 @@ type
     procedure Add(E: TTupleElement);
     procedure AddBoolean(B: Boolean);
     procedure AddInteger(I: Integer);
+    procedure AddProcessID(PID: TProcessID);
     procedure AddString(S: String);
     function  AsString: String; override;
     function  Copy: TTupleElement; override;
@@ -132,31 +133,74 @@ type
 
     procedure AddMessage(Msg: TActorMessage);
     function  IsEmpty: Boolean;
-    function  FindMessage(Condition: TMessageFinder): TActorMessage; overload;
+    function  FindMessage(Condition: TMessageFinder): TActorMessage;
     procedure Purge;
     procedure Timeout;
 
     property OnMessageArrived: TNotifyEvent read fOnMessageArrived write SetOnMessageArrived;
   end;
 
+  TActorMessageActionPair = class(TObject)
+  private
+    fAction:    TActOnMessage;
+    fCondition: TMessageFinder;
+  public
+    constructor Create(Condition: TMessageFinder; Action: TActOnMessage);
+
+    property Action:    TActOnMessage  read fAction;
+    property Condition: TMessageFinder read fCondition;
+  end;
+
+  TActorMessageTable = class(TObject)
+  private
+    List: TObjectList;
+
+    function GetAction(Index: Integer): TActOnMessage;
+    function GetCondition(Index: Integer): TMessageFinder;
+  public
+    constructor Create;
+    destructor  Destroy; override;
+
+    procedure Add(Condition: TMessageFinder; Action: TActOnMessage);
+    function  Count: Integer;
+
+    property Actions[Index: Integer]:    TActOnMessage  read GetAction;
+    property Conditions[Index: Integer]: TMessageFinder read GetCondition;
+  end;
+
+  // There are lots of names for parameterless procedures: I've called them
+  // "thunks" after the LISP community's term.
+  TThunk = procedure of object;
+
   // I represent an execution context. I send and receive messages to and from
   // other Actors.
   TActor = class(TThread)
   private
-    ActorReferences: TStringList;
-    fPID:            TProcessID;
-    Mailbox:         TActorMailbox;
-    MsgEvent:        TEvent;
+    fPID:     TProcessID;
+    Mailbox:  TActorMailbox;
+    MsgEvent: TEvent;
 
     procedure NewMessageArrived(Sender: TObject);
+    procedure NullMethod;
     procedure WaitForMessage(MillisecondTimeout: Cardinal);
   protected
+    MsgTable: TActorMessageTable;
     ParentID: TProcessID;
 
     procedure Execute; override;
-    procedure Receive(Matching: TMessageFinder; Action: TActOnMessage; Timeout: Cardinal = 0); overload;
+    procedure Receive(Matching: TMessageFinder;
+                      Action: TActOnMessage); overload;
+    procedure Receive(Matching: TMessageFinder;
+                      Action: TActOnMessage;
+                      Timeout: Cardinal;
+                      TimeoutAction: TThunk); overload;
+    procedure Receive(Table: TActorMessageTable); overload;
+    procedure Receive(Table: TActorMessageTable;
+                      Timeout: Cardinal;
+                      TimeoutAction: TThunk); overload;
+    procedure RegisterActions(Table: TActorMessageTable); virtual;
     procedure Run; virtual;
-    procedure Send(Target: TProcessID; Msg: TActorMessage);
+    procedure Send(Target: TProcessID; Msg: TTuple);
     function  Spawn(ActorType: TActorClass): TProcessID;
   public
     class function RootActor: TProcessID;
@@ -175,6 +219,11 @@ type
   // I translate messages sent to me into PostMessages to a Windows message
   // queue.
   TWindowsMessageForwarder = class(TActor)
+  private
+    function  MatchAll(Msg: TActorMessage): Boolean;
+    procedure ForwardToMessageQueue(Msg: TActorMessage);
+  protected
+    procedure Run; override;
   end;
 
   EActorException = class(Exception);
@@ -496,6 +545,11 @@ begin
   Self.TupleElements.Add(TIntegerElement.Create(I));
 end;
 
+procedure TTuple.AddProcessID(PID: TProcessID);
+begin
+  Self.TupleElements.Add(TProcessIDElement.Create(PID));
+end;
+
 procedure TTuple.AddString(S: String);
 begin
   Self.TupleElements.Add(TStringElement.Create(S));
@@ -764,6 +818,60 @@ begin
 end;
 
 //******************************************************************************
+//* TActorMessageActionPair                                                    *
+//******************************************************************************
+//* TActorMessageActionPair Public methods *************************************
+
+constructor TActorMessageActionPair.Create(Condition: TMessageFinder; Action: TActOnMessage);
+begin
+  inherited Create;
+
+  Self.fAction    := Action;
+  Self.fCondition := Condition;
+end;
+
+//******************************************************************************
+//* TActorMessageTable                                                         *
+//******************************************************************************
+//* TActorMessageTable Public methods ******************************************
+
+constructor TActorMessageTable.Create;
+begin
+  inherited Create;
+
+  Self.List := TObjectList.Create(true);
+end;
+
+destructor TActorMessageTable.Destroy;
+begin
+  Self.List.Free;
+
+  inherited Destroy;
+end;
+
+procedure TActorMessageTable.Add(Condition: TMessageFinder; Action: TActOnMessage);
+begin
+  Self.List.Add(TActorMessageActionPair.Create(Condition, Action));
+end;
+
+function TActorMessageTable.Count: Integer;
+begin
+  Result := Self.List.Count;
+end;
+
+//* TActorMessageTable Private methods *****************************************
+
+function TActorMessageTable.GetAction(Index: Integer): TActOnMessage;
+begin
+  Result := TActorMessageActionPair(Self.List[Index]).Action;
+end;
+
+function TActorMessageTable.GetCondition(Index: Integer): TMessageFinder;
+begin
+  Result := TActorMessageActionPair(Self.List[Index]).Condition;
+end;
+
+//******************************************************************************
 //* TActor                                                                     *
 //******************************************************************************
 //* TActor Public methods ******************************************************
@@ -789,19 +897,14 @@ begin
 
   Self.FreeOnTerminate := true;
 
-  Self.ActorReferences := TStringList.Create;
-  Self.ActorReferences.Duplicates := dupIgnore;
-  Self.ActorReferences.Sorted     := true;
-
-  // Special-case the Root Actor: by definition, it has no parent.
-  if (Parent <> '') then
-    Self.ActorReferences.Add(Parent);
-
   Self.ParentID := Parent;
 
   Self.Mailbox  := TActorMailbox.Create;
-  Self.MsgEvent := TSimpleEvent.Create;
   Self.Mailbox.OnMessageArrived := Self.NewMessageArrived;
+
+  Self.MsgEvent := TSimpleEvent.Create;
+  Self.MsgTable := TActorMessageTable.Create;
+  Self.RegisterActions(Self.MsgTable);
 
   Self.fPID := PrimitiveRegisterActor(Self);
 
@@ -814,9 +917,9 @@ begin
   // Notify all known actors of freeing!
 
   Self.Mailbox.OnMessageArrived := nil;
+  Self.MsgTable.Free;
   Self.MsgEvent.Free;
   Self.Mailbox.Free;
-  Self.ActorReferences.Free;
 
   LogEntry('', Format(ActorFreedMsg, [Self.PID]), 0, 'Ikaria', slDebug, 0, '');
 
@@ -836,39 +939,85 @@ begin
   end;
 end;
 
-procedure TActor.Receive(Matching: TMessageFinder; Action: TActOnMessage; Timeout: Cardinal = 0);
+procedure TActor.Receive(Matching: TMessageFinder;
+                         Action: TActOnMessage);
+begin
+  Self.Receive(Matching, Action, 0, Self.NullMethod);
+end;
+
+procedure TActor.Receive(Matching: TMessageFinder;
+                         Action: TActOnMessage;
+                         Timeout: Cardinal;
+                         TimeoutAction: TThunk);
 var
+  T: TActorMessageTable;
+begin
+  T := TActorMessageTable.Create;
+  try
+    T.Add(Matching, Action);
+    Self.Receive(T, Timeout, TimeoutAction);
+  finally
+    T.Free;
+  end;
+end;
+
+procedure TActor.Receive(Table: TActorMessageTable);
+begin
+  Self.Receive(Table, 0, Self.NullMethod);
+end;
+
+procedure TActor.Receive(Table: TActorMessageTable;
+                         Timeout: Cardinal;
+                         TimeoutAction: TThunk);
+var
+  I:   Integer;
   Msg: TActorMessage;
 begin
   // Block execution until we receive a message matching the condition/s defined
   // by the function Matching.
 
   while not Self.Terminated do begin
-    Msg := Self.Mailbox.FindMessage(Matching);
-    try
-      if Assigned(Msg) then begin
-        Action(Msg);
-        Break;
+    for I := 0 to Table.Count - 1 do begin
+      Msg := Self.Mailbox.FindMessage(Table.Conditions[I]);
+      try
+        if Assigned(Msg) then begin
+          Table.Actions[I](Msg);
+          Break;
+        end;
+      finally
+        Msg.Free;
       end;
-    finally
-      Msg.Free;
     end;
 
     Self.WaitForMessage(1000);
   end;
 end;
 
-procedure TActor.Run;
+procedure TActor.RegisterActions(Table: TActorMessageTable);
 begin
-  // For now, do nothing.
+  // Register actions against conditions
 end;
 
-procedure TActor.Send(Target: TProcessID; Msg: TActorMessage);
+procedure TActor.Run;
+begin
+  while not Self.Terminated do begin
+    Self.Receive(Self.MsgTable);
+  end;
+end;
+
+procedure TActor.Send(Target: TProcessID; Msg: TTuple);
+var
+  M: TActorMessage;
 begin
 //  if (ActorReferences.IndexOf(Target) = -1) then
 //    raise EActorException.Create(Format('Actor %s sent a message of type %s to an unknown target: %s', [Self.PID, Msg.ClassName, Target]));
 
-  PrimitiveSend(Self.PID, Target, Msg);
+  M := TActorMessage.Create;
+  try
+    PrimitiveSend(Self.PID, Target, M);
+  finally
+    M.Free;
+  end;
 end;
 
 function TActor.Spawn(ActorType: TActorClass): TProcessID;
@@ -893,6 +1042,11 @@ begin
   Self.MsgEvent.SetEvent;
 end;
 
+procedure TActor.NullMethod;
+begin
+  // Do nothing.
+end;
+
 procedure TActor.WaitForMessage(MillisecondTimeout: Cardinal);
 begin
   Self.MsgEvent.WaitFor(MillisecondTimeout);
@@ -908,6 +1062,32 @@ procedure TRootActor.Run;
 begin
   while not Terminated do
     Sleep(1000);
+end;
+
+//******************************************************************************
+//* TWindowsMessageForwarder                                                   *
+//******************************************************************************
+//* TWindowsMessageForwarder Protected methods *********************************
+
+procedure TWindowsMessageForwarder.Run;
+begin
+  while not Self.Terminated do begin
+    Self.Receive(Self.MatchAll, Self.ForwardToMessageQueue);
+  end;
+end;
+
+//* TWindowsMessageForwarder Private methods ***********************************
+
+function TWindowsMessageForwarder.MatchAll(Msg: TActorMessage): Boolean;
+begin
+  Result := true;
+end;
+
+procedure TWindowsMessageForwarder.ForwardToMessageQueue(Msg: TActorMessage);
+begin
+  // * Map the Msg to a (Windows) Message;
+  // * dump the tuple into the WParam;
+  // * send to a Windows message queue.
 end;
 
 initialization
