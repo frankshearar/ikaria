@@ -38,6 +38,7 @@ type
     procedure SetUp; override;
     procedure TearDown; override;
   published
+    procedure TestAsString;
     procedure TestCopy;
     procedure TestEquals;
     procedure TestValue;
@@ -50,6 +51,7 @@ type
     procedure SetUp; override;
     procedure TearDown; override;
   published
+    procedure TestAsString;
     procedure TestCopy;
     procedure TestEquals;
     procedure TestValue;
@@ -62,6 +64,7 @@ type
     procedure SetUp; override;
     procedure TearDown; override;
   published
+    procedure TestAsString;
     procedure TestCopy;
     procedure TestEquals;
     procedure TestValue;
@@ -74,6 +77,7 @@ type
     procedure SetUp; override;
     procedure TearDown; override;
   published
+    procedure TestAsString;
     procedure TestCopy;
     procedure TestEquals;
     procedure TestValue;
@@ -94,6 +98,7 @@ type
     procedure TestAddString;
     procedure TestAsString;
     procedure TestAsStringEmptyTuple;
+    procedure TestAsStringTree;
     procedure TestCopy;
     procedure TestEquals;
     procedure TestEqualsOnTree;
@@ -279,6 +284,11 @@ end;
 
 //* TestTBooleanElement Published methods **************************************
 
+procedure TestTBooleanElement.TestAsString;
+begin
+  CheckEquals(BoolStrs[Self.B.Value], Self.B.AsString, 'BooleanElement.AsString');
+end;
+
 procedure TestTBooleanElement.TestCopy;
 var
   C: TBooleanElement;
@@ -338,6 +348,11 @@ begin
 end;
 
 //* TestTIntegerElement Published methods **************************************
+
+procedure TestTIntegerElement.TestAsString;
+begin
+  CheckEquals(IntToStr(Self.I.Value), Self.I.AsString, 'IntegerElement.AsString');
+end;
 
 procedure TestTIntegerElement.TestCopy;
 var
@@ -399,6 +414,11 @@ end;
 
 //* TestTProcessIDElement Published methods ************************************
 
+procedure TestTProcessIDElement.TestAsString;
+begin
+  CheckEquals(Format('{%s}', [Self.PID.Value]), Self.PID.AsString, 'ProcessIDElement.AsString');
+end;
+
 procedure TestTProcessIDElement.TestCopy;
 var
   C: TProcessIDElement;
@@ -458,6 +478,11 @@ begin
 end;
 
 //* TestTStringElement Published methods ***************************************
+
+procedure TestTStringElement.TestAsString;
+begin
+  CheckEquals(Format('"%s"', [Self.S.Value]), Self.S.AsString, 'StringElement.AsString');
+end;
 
 procedure TestTStringElement.TestCopy;
 var
@@ -628,6 +653,13 @@ end;
 procedure TestTTuple.TestAsStringEmptyTuple;
 begin
   CheckEquals('()', Self.T.AsString, 'AsString on empty tuple');
+end;
+
+procedure TestTTuple.TestAsStringTree;
+begin
+  Self.ConstructTree(Self.T);
+
+  CheckEquals('("tree" ("leaf"))', Self.T.AsString, 'AsString on tree');
 end;
 
 procedure TestTTuple.TestCopy;

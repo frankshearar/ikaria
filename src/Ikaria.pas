@@ -186,6 +186,10 @@ const
   ExitReasonException = '%s: %s';
   ExitReasonNormal    = 'normal';
 
+// String conversion
+const
+  BoolStrs: array[false..true] of String = ('false', 'true');
+
 implementation
 
 uses
@@ -350,8 +354,6 @@ begin
 end;
 
 function TBooleanElement.AsString: String;
-const
-  BoolStrs: array[false..true] of String = ('false', 'true');
 begin
   Result := BoolStrs[Self.Value];
 end;
@@ -409,7 +411,7 @@ end;
 
 function TProcessIDElement.AsString: String;
 begin
-  Result := Self.Value;
+  Result := Format('{%s}', [Self.Value]);
 end;
 
 function TProcessIDElement.Copy: TTupleElement;
@@ -437,7 +439,7 @@ end;
 
 function TStringElement.AsString: String;
 begin
-  Result := Self.Value;
+  Result := Format('"%s"', [Self.Value]);
 end;
 
 function TStringElement.Copy: TTupleElement;
@@ -494,6 +496,8 @@ function TTuple.AsString: String;
 var
   I: Integer;
 begin
+  // Return a lisp-like s-expression representing this tuple.
+
   Result := '(';
 
   for I := 0 to Self.Count - 1 do
