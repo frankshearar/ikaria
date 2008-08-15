@@ -106,8 +106,9 @@ type
 
   TestTActorMailbox = class(TTestCase)
   private
-    Mbox: TActorMailbox;
-    M:    TActorMessage;
+    Mbox:    TActorMailbox;
+    M:       TActorMessage;
+    NewMsgs: Boolean;
 
     function  AllFinder(Msg: TActorMessage): Boolean;
     procedure CheckFound(ExpectedTag: String;
@@ -115,6 +116,7 @@ type
                          Condition: TMessageFinder;
                          MsgPrefix: String);
     function  NullFinder(Msg: TActorMessage): Boolean;
+    procedure RegisterMessageArrival(Sender: TObject);
   public
     procedure SetUp; override;
     procedure TearDown; override;
@@ -123,6 +125,7 @@ type
     procedure TestFindMessageEmptyMailbox;
     procedure TestFindMessageReturnsFirstMatch;
     procedure TestFindMessageStoredMessagesInSaveQueue;
+    procedure TestNotifyOfNewMessages;
     procedure TestPurge;
     procedure TestTimeoutRestoresSaveQueueMessages;
   end;
@@ -739,8 +742,9 @@ procedure TestTActorMailbox.SetUp;
 begin
   inherited SetUp;
 
-  Self.Mbox := TActorMailbox.Create;
-  Self.M    := TActorMessage.Create;
+  Self.Mbox    := TActorMailbox.Create;
+  Self.M       := TActorMessage.Create;
+  Self.NewMsgs := false;
 end;
 
 procedure TestTActorMailbox.TearDown;
@@ -777,6 +781,11 @@ end;
 function TestTActorMailbox.NullFinder(Msg: TActorMessage): Boolean;
 begin
   Result := false;
+end;
+
+procedure TestTActorMailbox.RegisterMessageArrival(Sender: TObject);
+begin
+  Self.NewMsgs := true;
 end;
 
 //* TestTActorMailbox Published methods ****************************************
@@ -847,6 +856,15 @@ begin
   finally
     M2.Free;
   end;
+end;
+
+procedure TestTActorMailbox.TestNotifyOfNewMessages;
+begin
+  Self.Mbox.OnMessageArrived := Self.RegisterMessageArrival;
+
+  Self.Mbox.AddMessage(Self.M);
+
+  Check(Self.NewMsgs, 'No notification of new messages');
 end;
 
 procedure TestTActorMailbox.TestPurge;

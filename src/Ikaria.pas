@@ -114,15 +114,18 @@ type
   // I store messages sent to an Actor.
   TActorMailbox = class(TObject)
   private
-    Lock:      TCriticalSection;
-    Messages:  TObjectList;
-    SaveQueue: TObjectList;
+    fOnMessageArrived: TNotifyEvent;
+    Lock:              TCriticalSection;
+    Messages:          TObjectList;
+    SaveQueue:         TObjectList;
 
     procedure FreeMessage(L: TObjectList; M: TActorMessage);
     procedure FreeMessages(L: TObjectList);
     function  MessageAt(Index: Integer): TActorMessage;
     procedure MoveMessages(Src, Dest: TObjectList; FromIndex, ToIndex: Integer);
+    procedure NotifyOfMessageArrived;
     procedure RestoreSaveQueue;
+    procedure SetOnMessageArrived(Value: TNotifyEvent);
   public
     constructor Create;
     destructor  Destroy; override;
@@ -132,6 +135,8 @@ type
     function  FindMessage(Condition: TMessageFinder): TActorMessage; overload;
     procedure Purge;
     procedure Timeout;
+
+    property OnMessageArrived: TNotifyEvent read fOnMessageArrived write SetOnMessageArrived;
   end;
 
   // I represent an execution context. I send and receive messages to and from
@@ -141,6 +146,10 @@ type
     ActorReferences: TStringList;
     fPID:            TProcessID;
     Mailbox:         TActorMailbox;
+    MsgEvent:        TEvent;
+
+    procedure NewMessageArrived(Sender: TObject);
+    procedure WaitForMessage(MillisecondTimeout: Cardinal);
   protected
     ParentID: TProcessID;
 
@@ -626,6 +635,8 @@ begin
     Self.Messages.Add(Msg.Copy);
 
     Self.RestoreSaveQueue;
+
+    Self.NotifyOfMessageArrived;
   finally
     Self.Lock.Release;
   end;
@@ -729,9 +740,25 @@ begin
     Src.Delete(FromIndex);
 end;
 
+procedure TActorMailbox.NotifyOfMessageArrived;
+begin
+  if Assigned(Self.fOnMessageArrived) then
+    Self.fOnMessageArrived(Self);
+end;
+
 procedure TActorMailbox.RestoreSaveQueue;
 begin
   Self.MoveMessages(Self.SaveQueue, Self.Messages, 0, Self.SaveQueue.Count - 1);
+end;
+
+procedure TActorMailbox.SetOnMessageArrived(Value: TNotifyEvent);
+begin
+  Self.Lock.Acquire;
+  try
+    Self.fOnMessageArrived := Value;
+  finally
+    Self.Lock.Release;
+  end;
 end;
 
 //******************************************************************************
@@ -770,7 +797,9 @@ begin
 
   Self.ParentID := Parent;
 
-  Self.Mailbox := TActorMailbox.Create;
+  Self.Mailbox  := TActorMailbox.Create;
+  Self.MsgEvent := TSimpleEvent.Create;
+  Self.Mailbox.OnMessageArrived := Self.NewMessageArrived;
 
   Self.fPID := PrimitiveRegisterActor(Self);
 
@@ -782,6 +811,8 @@ begin
   PrimitiveUnregisterActor(Self);
   // Notify all known actors of freeing!
 
+  Self.Mailbox.OnMessageArrived := nil;
+  Self.MsgEvent.Free;
   Self.Mailbox.Free;
   Self.ActorReferences.Free;
 
@@ -821,8 +852,7 @@ begin
       Msg.Free;
     end;
 
-    // Wait a bit.
-    Sleep(1000);
+    Self.WaitForMessage(1000);
   end;
 end;
 
@@ -846,6 +876,25 @@ begin
   A := ActorType.Create(Self.PID);
 
   Result := A.PID;
+
+  A.Resume;
+end;
+
+//* TActor Private methods *****************************************************
+
+procedure TActor.NewMessageArrived(Sender: TObject);
+begin
+  // This executes in the context of whatever thread's currently controlling the
+  // mailbox.
+  // Sender points to the mailbox.
+
+  Self.MsgEvent.SetEvent;
+end;
+
+procedure TActor.WaitForMessage(MillisecondTimeout: Cardinal);
+begin
+  Self.MsgEvent.WaitFor(MillisecondTimeout);
+  Self.MsgEvent.ResetEvent;
 end;
 
 //******************************************************************************
