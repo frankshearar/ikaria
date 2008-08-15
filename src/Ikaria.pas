@@ -659,7 +659,8 @@ var
   M:          TActorMessage;
 begin
   // Return the first matching message, and remove it from the mailbox.
-  // Move all non-matching-but-checked messages to the save queue (preserving arrival order).
+  // Move all non-matching-but-checked messages to the save queue (preserving
+  // arrival order).
 
   Self.Lock.Acquire;
   try
@@ -698,7 +699,8 @@ end;
 procedure TActorMailbox.Timeout;
 begin
   // Call this method when you've timed out waiting for a message.
-  // Move any messages in the save queue back into the mailbox proper (preserving arrival order).
+  // Move any messages in the save queue back into the mailbox proper
+  // (preserving arrival order).
 
   Self.Lock.Acquire;
   try
