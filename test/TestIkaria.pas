@@ -3,7 +3,7 @@ unit TestIkaria;
 interface
 
 uses
-  Ikaria, PluggableLogging, SyncObjs, TestFramework;
+  Ikaria, PluggableLogging, SyncObjs, SysUtils, TestFramework;
 
 type
   TLogEntry = class(TObject)
@@ -152,7 +152,7 @@ type
 implementation
 
 uses
-  Contnrs, SysUtils;
+  Contnrs;
 
 type
   TEventTriggeringActor = class(TActor)
