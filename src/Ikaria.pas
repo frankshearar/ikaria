@@ -743,8 +743,10 @@ class function TActor.RootActor: TProcessID;
 begin
   ActorLock.Acquire;
   try
-    if not Assigned(Root) then
+    if not Assigned(Root) then begin
       Root := TRootActor.Create('');
+      Root.Resume;
+    end;
 
     Result := Root.PID;
   finally
@@ -773,8 +775,6 @@ begin
   Self.fPID := PrimitiveRegisterActor(Self);
 
   LogEntry('', Format(ActorCreatedMsg, [Self.PID]), 0, 'Ikaria', slDebug, 0, '');
-
-  Self.Resume;
 end;
 
 destructor TActor.Destroy;
