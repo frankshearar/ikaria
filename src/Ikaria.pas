@@ -92,6 +92,8 @@ type
   end;
 
   // I represent a message sent to an Actor.
+  //
+  // I will free the Data you give me.
   TActorMessage = class(TObject)
   private
     fData: TTuple;
@@ -104,7 +106,7 @@ type
     function  AsString: String; virtual;
     function  Copy: TActorMessage; virtual;
 
-    property Data: TTuple read fData;
+    property Data: TTuple read fData write fData;
     property Tag:  String read fTag;
   end;
 
@@ -646,8 +648,8 @@ end;
 function TActorMessage.Copy: TActorMessage;
 begin
   Result := TActorMessage.Create;
-  Result.fData := Self.Data.Copy as TTuple;
-  Result.fTag  := Self.Tag;
+  Result.Data := Self.Data.Copy as TTuple;
+  Result.fTag := Self.Tag;
 end;
 
 //******************************************************************************
@@ -1014,6 +1016,7 @@ begin
 
   M := TActorMessage.Create;
   try
+    M.Data := Msg.Copy as TTuple;
     PrimitiveSend(Self.PID, Target, M);
   finally
     M.Free;

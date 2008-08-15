@@ -46,7 +46,7 @@ implementation
 {$R *.dfm}
 
 uses
-  PluggableLogging, SyncObjs;
+  PluggableLogging, SyncObjs, SysUtils;
 
 const
   PingName = 'ping';
@@ -69,7 +69,8 @@ procedure LogToDemo(LogName: String;
 begin
   Lock.Acquire;
   try
-    PingPongDemo.Log.Lines.Add(Description);
+    if (Severity > slDebug) then
+      PingPongDemo.Log.Lines.Add(Description);
   finally
     Lock.Release;
   end;
@@ -135,7 +136,8 @@ end;
 
 procedure TPingActor.ReactToPong(Msg: TActorMessage);
 begin
-  LogEntry('', PongName, 0, 'PingPongDemo', slDebug, 0, Self.PID);
+  LogEntry('', PongName, 0, 'PingPongDemo', slInfo, 0, Self.PID);
+  Sleep(1000);
   Self.Ping(Self.Ponger);
 end;
 
@@ -185,7 +187,8 @@ end;
 
 procedure TPongActor.ReactToPing(Msg: TActorMessage);
 begin
-  LogEntry('', PingName, 0, 'PingPongDemo', slDebug, 0, Self.PID);
+  LogEntry('', PingName, 0, 'PingPongDemo', slInfo, 0, Self.PID);
+  Sleep(1000);
   Self.Pong(Self.ParentID);
 end;
 

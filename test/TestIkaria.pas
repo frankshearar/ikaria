@@ -169,6 +169,7 @@ type
     procedure TestDyingActorsMakesLogs;
     procedure TestSpawningActorsMakesLogs;
     procedure TestSendMakesLogs;
+    procedure SendSendsData;
   end;
 
 implementation
@@ -1114,6 +1115,11 @@ begin
   TSingleShotActor.Create(TActor.RootActor);
 
   CheckLogForSendMessage;
+end;
+
+procedure TestTActor.SendSendsData;
+begin
+  Fail('Test that the send actually sends (all) the data!');
 end;
 
 initialization;
