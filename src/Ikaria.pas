@@ -605,8 +605,8 @@ constructor TActorMailbox.Create;
 begin
   inherited Create;
 
-  Self.Lock     := TCriticalSection.Create;
-  Self.Messages := TObjectList.Create(false);
+  Self.Lock      := TCriticalSection.Create;
+  Self.Messages  := TObjectList.Create(false);
   Self.SaveQueue := TObjectList.Create(false);
 end;
 
