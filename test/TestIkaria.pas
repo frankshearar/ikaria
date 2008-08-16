@@ -3,7 +3,7 @@ unit TestIkaria;
 interface
 
 uses
-  Ikaria, PluggableLogging, SyncObjs, SysUtils, TestFramework;
+  Ikaria, SyncObjs, SysUtils, TestFramework;
 
 type
   TLogEntry = class(TObject)
@@ -12,7 +12,7 @@ type
     fDescription: String;
     fSourceRef: Cardinal;
     fSourceDesc: String;
-    fSeverity: TSeverityLevel;
+    fSeverity: Cardinal;
     fEventRef: Cardinal;
     fDebugInfo: String;
   public
@@ -20,15 +20,16 @@ type
                        Description: String;
                        SourceRef: Cardinal;
                        SourceDesc: String;
-                       Severity: TSeverityLevel;
+                       Severity: Cardinal;
                        EventRef: Cardinal;
                        DebugInfo: String);
-    property LogName: String          read fLogName;
-    property Description: String      read fDescription;
-    property SourceRef: Cardinal      read fSourceRef;
-    property SourceDesc: String       read fSourceDesc;
-    property Severity: TSeverityLevel read fSeverity;
-    property EventRef: Cardinal       read fEventRef;
+                       
+    property LogName: String     read fLogName;
+    property Description: String read fDescription;
+    property SourceRef: Cardinal read fSourceRef;
+    property SourceDesc: String  read fSourceDesc;
+    property Severity: Cardinal  read fSeverity;
+    property EventRef: Cardinal  read fEventRef;
   end;
 
   TestTBooleanElement = class(TTestCase)
@@ -154,22 +155,21 @@ type
 
   TestTActor = class(TTestCase)
   private
-    E: TEvent;
+    ActorExited: Boolean;
+    E:           TEvent;
+    ExitEvent:   TEvent;
+    LastSentMsg: TActorMessage;
+    MsgEvent:    TEvent;
 
-    procedure CheckLogForCreationMessage;
-    procedure CheckLogForExitMessage;
-    procedure CheckLogForFreeMessage;
-    procedure CheckLogForMessage(Substring: String; Msg: String);
-    procedure CheckLogForSendMessage;
-    function  FindLogWithDescriptionContaining(Substring: String): TLogEntry;
+    procedure NotifyOfExit(PID: String; Reason: TTuple);
+    procedure StoreLastSentMessage(Sender, Target: TProcessID; Msg: TActorMessage);
+    procedure WaitFor(E: TEvent; Timeout: Cardinal; Msg: String);
+    procedure WaitForExit(Timeout: Cardinal = 1000);
+    procedure WaitForMsg(Timeout: Cardinal = 1000);
   public
     procedure SetUp; override;
     procedure TearDown; override;
   published
-    procedure TestDyingActorsMakesLogs;
-    procedure TestSpawningActorsMakesLogs;
-    procedure TestSendMakesLogs;
-    procedure SendSendsData;
   end;
 
 implementation
@@ -178,25 +178,66 @@ uses
   Contnrs;
 
 type
-  TEventTriggeringActor = class(TActor)
-  private
-    function  Ping(Msg: TActorMessage): Boolean;
-    procedure Pong(Msg: TActorMessage);
-  protected
-    procedure Run; override;
-  end;
-
   TSingleShotActor = class(TActor)
   protected
     procedure Run; override;
   end;
 
 var
-  Lock: TCriticalSection;
-  Log:  TObjectList;
+  Lock:            TCriticalSection;
+  Log:             TObjectList;
+  RunningTestCase: TestTActor;
 
 const
   QuarterSecond = 500;
+
+procedure LogEntry(LogName: String;
+                   Description: String;
+                   SourceRef: Cardinal;
+                   SourceDesc: String;
+                   Severity: Cardinal;
+                   EventRef: Cardinal;
+                   DebugInfo: String);
+begin
+  Lock.Acquire;
+  try
+    Log.Add(TLogEntry.Create(LogName, Description, SourceRef, SourceDesc, Severity, EventRef, DebugInfo));
+  finally
+    Lock.Release;
+  end;
+end;
+
+procedure PurgeLog;
+var
+  I: Integer;
+begin
+  Lock.Acquire;
+  try
+    Log.Clear;
+  finally
+    Lock.Release;
+  end;
+end;
+
+procedure NotifyOfActorCreation(ActorType, PID: String);
+begin
+  LogEntry('', Format(ActorCreatedMsg, [PID, ActorType]), 0, 'Ikaria', 0, 0, '');
+end;
+
+procedure NotifyOfActorExit(PID: String; ExitReason: TTuple);
+begin
+  LogEntry('', Format(ActorExitedMsg, [PID, ExitReason.AsString]), 0, 'Ikaria', 0, 0, '');
+
+  if Assigned(RunningTestCase) then
+    RunningTestCase.NotifyOfExit(PID, ExitReason);
+end;
+
+procedure StoreLastSentMessageInTestCase(Sender, Target: TProcessID; Msg: TActorMessage);
+begin
+  LogEntry('', Format(MessageSentMsg, [Sender, Target, Msg.AsString]), 0, 'Ikaria', 0, 0, '');
+  if Assigned(RunningTestCase) then
+    RunningTestCase.StoreLastSentMessage(Sender, Target, Msg);
+end;
 
 function Suite: ITestSuite;
 begin
@@ -209,28 +250,6 @@ begin
   Result.AddSuite(TestTActorMailbox.Suite);
   Result.AddSuite(TestTActorMessageTable.Suite);
   Result.AddSuite(TestTActor.Suite);
-end;
-
-//******************************************************************************
-//* TEventTriggeringActor                                                      *
-//******************************************************************************
-//* TEventTriggeringActor Protected methods ************************************
-
-procedure TEventTriggeringActor.Run;
-begin
-  Self.Receive(Self.Ping, Self.Pong);
-end;
-
-//* TEventTriggeringActor Private methods **************************************
-
-function TEventTriggeringActor.Ping(Msg: TActorMessage): Boolean;
-begin
-  Result := true;
-end;
-
-procedure TEventTriggeringActor.Pong(Msg: TActorMessage);
-begin
-
 end;
 
 //******************************************************************************
@@ -261,7 +280,7 @@ constructor TLogEntry.Create(LogName: String;
                              Description: String;
                              SourceRef: Cardinal;
                              SourceDesc: String;
-                             Severity: TSeverityLevel;
+                             Severity: Cardinal;
                              EventRef: Cardinal;
                              DebugInfo: String);
 begin
@@ -274,22 +293,6 @@ begin
   Self.fSeverity    := Severity;
   Self.fEventRef    := EventRef;
   Self.fDebugInfo   := DebugInfo;
-end;
-
-procedure LogEntry(LogName: String;
-                   Description: String;
-                   SourceRef: Cardinal;
-                   SourceDesc: String;
-                   Severity: TSeverityLevel;
-                   EventRef: Cardinal;
-                   DebugInfo: String);
-begin
-  Lock.Acquire;
-  try
-    Log.Add(TLogEntry.Create(LogName, Description, SourceRef, SourceDesc, Severity, EventRef, DebugInfo));
-  finally
-    Lock.Release;
-  end;
 end;
 
 //******************************************************************************
@@ -1034,11 +1037,27 @@ procedure TestTActor.SetUp;
 begin
   inherited SetUp;
 
-  Self.E := TSimpleEvent.Create;
+  PurgeLog;
+
+  RunningTestCase := Self;
+
+  Self.E         := TSimpleEvent.Create;
+  Self.ExitEvent := TSimpleEvent.Create;
+  Self.MsgEvent  := TSimpleEvent.Create;
+
+  OnActorExitedHook := NotifyOfActorExit;
+  OnMessageSentHook := StoreLastSentMessageInTestCase;
+  Self.ActorExited  := false;
+  Self.LastSentMsg  := nil;
 end;
 
 procedure TestTActor.TearDown;
 begin
+  RunningTestCase := nil;
+
+  Self.MsgEvent.Free;
+  Self.LastSentMsg.Free;
+  Self.ExitEvent.Free;
   Self.E.Free;
 
   inherited TearDown;
@@ -1046,84 +1065,38 @@ end;
 
 //* TestTActor Private methods *************************************************
 
-procedure TestTActor.CheckLogForCreationMessage;
+procedure TestTActor.NotifyOfExit(PID: String; Reason: TTuple);
 begin
-  CheckLogForMessage('created', 'No log of an Actor creation');
+  Self.ActorExited := true;
+  Self.ExitEvent.SetEvent;
 end;
 
-procedure TestTActor.CheckLogForExitMessage;
+procedure TestTActor.StoreLastSentMessage(Sender, Target: TProcessID; Msg: TActorMessage);
 begin
-  CheckLogForMessage('exited', 'No log of an Actor exit');
+  Self.LastSentMsg.Free;
+  Self.LastSentMsg := Msg.Copy;
+  Self.MsgEvent.SetEvent;
 end;
 
-procedure TestTActor.CheckLogForFreeMessage;
+procedure TestTActor.WaitFor(E: TEvent; Timeout: Cardinal; Msg: String);
 begin
-  CheckLogForMessage('freed', 'No log of an Actor freeing');
+  if (wrSignaled <> E.WaitFor(Timeout)) then
+    Fail(Msg);
 end;
 
-procedure TestTActor.CheckLogForMessage(Substring: String; Msg: String);
+procedure TestTActor.WaitForExit(Timeout: Cardinal = 1000);
 begin
-  Lock.Acquire;
-  try
-    Check(Assigned(FindLogWithDescriptionContaining(Substring)), Msg);
-  finally
-    Lock.Release;
-  end;
+  Self.WaitFor(Self.ExitEvent, 1000, 'Timed out waiting for an exit notification');
 end;
 
-procedure TestTActor.CheckLogForSendMessage;
+procedure TestTActor.WaitForMsg(Timeout: Cardinal = 1000);
 begin
-  CheckLogForMessage('sent', 'No log of a message send');
-end;
-
-function TestTActor.FindLogWithDescriptionContaining(Substring: String): TLogEntry;
-var
-  E: TLogEntry;
-  I: Integer;
-begin
-  // PRECONDITION: You've Acquired Lock.
-  Result := nil;
-
-  for I := 0 to Log.Count - 1 do begin
-    E := Log[I] as TLogEntry;
-    if (Pos(Substring, E.Description) > 0) then begin
-      Result := E;
-      Break;
-    end;
-  end;
+  Self.WaitFor(Self.MsgEvent, 1000, 'Timed out waiting for a message');
 end;
 
 //* TestTActor Published methods ***********************************************
 
-procedure TestTActor.TestDyingActorsMakesLogs;
-begin
-  TActor.Create('');
-
-  CheckLogForExitMessage;
-  CheckLogForFreeMessage;
-end;
-
-procedure TestTActor.TestSpawningActorsMakesLogs;
-begin
-  TActor.Create('');
-
-  CheckLogForCreationMessage;
-end;
-
-procedure TestTActor.TestSendMakesLogs;
-begin
-  TSingleShotActor.Create(TActor.RootActor);
-
-  CheckLogForSendMessage;
-end;
-
-procedure TestTActor.SendSendsData;
-begin
-  Fail('Test that the send actually sends (all) the data!');
-end;
-
 initialization;
-  PluggableLogging.Logger := LogEntry;
   Lock := TCriticalSection.Create;
   Log  := TObjectList.Create(true);
 

@@ -203,6 +203,8 @@ type
     procedure RegisterActions(Table: TActorMessageTable); virtual;
     procedure Run; virtual;
     procedure Send(Target: TProcessID; Msg: TTuple);
+    procedure SendExceptionalExit(E: Exception);
+    procedure SendNormalExit;
     function  Spawn(ActorType: TActorClass): TProcessID;
   public
     class function RootActor: TProcessID;
@@ -243,17 +245,27 @@ const
   MessageSentMsg  = 'Actor %s sent message to actor %s: %s';
 
 const
+  ExitMsg             = 'exit';
   ExitReasonException = '%s: %s';
   ExitReasonNormal    = 'normal';
+  ExitReasonKill       = 'kill';
 
 // String conversion
 const
   BoolStrs: array[false..true] of String = ('false', 'true');
 
-implementation
+// Introspection callbacks
+type
+  TActorEventProc  = procedure(ActorType, PID, Event: String);
+  TActorMsgProc    = procedure(PID: String; Data: TTuple);
+  TMessageSendProc = procedure(Sender, Target: TProcessID; Msg: TActorMessage);
 
-uses
-  PluggableLogging;
+var
+  OnActorCreatedHook: TActorEventProc;
+  OnActorExitedHook:  TActorMsgProc;
+  OnMessageSentHook:  TMessageSendProc;
+
+implementation
 
 var
   Actors:    TStringList;
@@ -296,6 +308,24 @@ begin
   finally
     ActorLock.Release;
   end;
+end;
+
+procedure NotifyOfActorCreation(ActorType, PID: String);
+begin
+  if Assigned(OnActorCreatedHook) then
+    OnActorCreatedHook(ActorType, PID, 'Actor created');
+end;
+
+procedure NotifyOfActorExit(PID: String; ExitReason: TTuple);
+begin
+  if Assigned(OnActorExitedHook) then
+    OnActorExitedHook(PID, ExitReason);
+end;
+
+procedure NotifyOfMessageSend(Sender, Target: TProcessID; Msg: TActorMessage);
+begin
+  if Assigned(OnMessageSentHook) then
+    OnMessageSentHook(Sender, Target, Msg);
 end;
 
 function NextTag: String;
@@ -346,7 +376,7 @@ begin
       ActorLock.Release;
     end;
 
-    LogEntry('', Format(MessageSentMsg, [Sender, Target, Msg.AsString]), 0, 'Ikaria', slDebug, 0, '');
+    NotifyOfMessageSend(Sender, Target, Msg);
   finally
     SendLock.Release;
   end;
@@ -910,7 +940,7 @@ begin
 
   Self.fPID := PrimitiveRegisterActor(Self);
 
-  LogEntry('', Format(ActorCreatedMsg, [Self.PID]), 0, 'Ikaria', slDebug, 0, '');
+  NotifyOfActorCreation(Self.ClassName, Self.PID);
 end;
 
 destructor TActor.Destroy;
@@ -923,8 +953,6 @@ begin
   Self.MsgEvent.Free;
   Self.Mailbox.Free;
 
-  LogEntry('', Format(ActorFreedMsg, [Self.PID]), 0, 'Ikaria', slDebug, 0, '');
-
   inherited Destroy;
 end;
 
@@ -934,10 +962,10 @@ procedure TActor.Execute;
 begin
   try
     Self.Run;
-    LogEntry('', Format(ActorExitedMsg, [Self.PID, ExitReasonNormal]), 0, 'Ikaria', slDebug, 0, '');
+    Self.SendNormalExit;
   except
     on E: Exception do
-      LogEntry('', Format(ActorExitedMsg, [Self.PID, Format(ExitReasonException, [E.ClassName, E.Message])]), 0, 'Ikaria', slDebug, 0, '');
+      Self.SendExceptionalExit(E);
   end;
 end;
 
@@ -1007,20 +1035,50 @@ begin
   end;
 end;
 
-procedure TActor.Send(Target: TProcessID; Msg: TTuple);
+procedure TActor.SendExceptionalExit(E: Exception);
 var
-  M: TActorMessage;
+  BadExit: TTuple;
+begin
+  BadExit := TTuple.Create;
+  try
+    BadExit.AddProcessID(Self.PID);
+    BadExit.AddString(ExitMsg);
+    BadExit.AddString(Format(ExitReasonException, [E.ClassName, E.Message]));
+
+    // Send to everyone in the link set!
+
+
+    NotifyOfActorExit(Self.PID, BadExit);
+  finally
+    BadExit.Free;
+  end;
+end;
+
+procedure TActor.SendNormalExit;
+var
+  NormalExit: TTuple;
+begin
+  NormalExit := TTuple.Create;
+  try
+    NormalExit.AddProcessID(Self.PID);
+    NormalExit.AddString(ExitMsg);
+    NormalExit.AddString(ExitReasonNormal);
+
+    // Send to everyone in the link set!
+
+
+    NotifyOfActorExit(Self.PID, NormalExit);
+  finally
+    NormalExit.Free;
+  end;
+end;
+
+procedure TActor.Send(Target: TProcessID; Msg: TTuple);
 begin
 //  if (ActorReferences.IndexOf(Target) = -1) then
 //    raise EActorException.Create(Format('Actor %s sent a message of type %s to an unknown target: %s', [Self.PID, Msg.ClassName, Target]));
 
-  M := TActorMessage.Create;
-  try
-    M.Data := Msg.Copy as TTuple;
-    PrimitiveSend(Self.PID, Target, M);
-  finally
-    M.Free;
-  end;
+  PrimitiveSend(Self.PID, Target, Msg);
 end;
 
 function TActor.Spawn(ActorType: TActorClass): TProcessID;

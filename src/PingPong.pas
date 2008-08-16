@@ -46,11 +46,13 @@ implementation
 {$R *.dfm}
 
 uses
-  PluggableLogging, SyncObjs, SysUtils;
+  SyncObjs, SysUtils;
 
 const
-  PingName = 'ping';
-  PongName = 'pong';
+  LevelDebug = 0;
+  LevelInfo  = 1;
+  PingName   = 'ping';
+  PongName   = 'pong';
 
 var
   Lock: TCriticalSection;
@@ -63,17 +65,39 @@ procedure LogToDemo(LogName: String;
                     Description: String;
                     SourceRef: Cardinal;
                     SourceDesc: String;
-                    Severity: TSeverityLevel;
+                    Severity: Cardinal;
                     EventRef: Cardinal;
                     DebugInfo: String);
 begin
   Lock.Acquire;
   try
-    if (Severity > slDebug) then
-      PingPongDemo.Log.Lines.Add(Description);
+    try
+//      if (Severity > slDebug) then
+        PingPongDemo.Log.Lines.Add(Description);
+    except
+      on E: Exception do begin
+        PingPongDemo.Log.Lines.Add(Format('+++++ %s: %s +++++', [E.ClassName, E.Message]));
+        raise;
+      end;
+    end;
   finally
     Lock.Release;
   end;
+end;
+
+procedure NotifyOfActorCreation(ActorType, PID: String; Event: String);
+begin
+  LogToDemo('', Format(ActorCreatedMsg, [PID, ActorType]), 0, 'Ikaria', LevelDebug, 0, '');
+end;
+
+procedure NotifyOfActorExit(PID: String; ExitReason: TTuple);
+begin
+  LogToDemo('', Format(ActorExitedMsg, [PID, ExitReason.AsString]), 0, 'Ikaria', LevelDebug, 0, '');
+end;
+
+procedure NotifyOfMessageSend(Sender, Target: TProcessID; Msg: TActorMessage);
+begin
+  LogToDemo('', Format(MessageSentMsg, [Sender, Target, Msg.AsString]), 0, 'Ikaria', LevelDebug, 0, '');
 end;
 
 //******************************************************************************
@@ -85,7 +109,9 @@ constructor TPingPongDemo.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
 
-  PluggableLogging.Logger := LogToDemo;
+  Ikaria.OnActorCreatedHook := NotifyOfActorCreation;
+  Ikaria.OnActorExitedHook  := NotifyOfActorExit;
+  Ikaria.OnMessageSentHook  := NotifyOfMessageSend;
 end;
 
 //* TPingPongDemo Published methods ********************************************
@@ -136,7 +162,7 @@ end;
 
 procedure TPingActor.ReactToPong(Msg: TActorMessage);
 begin
-  LogEntry('', PongName, 0, 'PingPongDemo', slInfo, 0, Self.PID);
+  LogToDemo('', PongName, 0, 'PingPongDemo', LevelInfo, 0, Self.PID);
   Sleep(1000);
   Self.Ping(Self.Ponger);
 end;
@@ -187,7 +213,7 @@ end;
 
 procedure TPongActor.ReactToPing(Msg: TActorMessage);
 begin
-  LogEntry('', PingName, 0, 'PingPongDemo', slInfo, 0, Self.PID);
+  LogToDemo('', PingName, 0, 'PingPongDemo', LevelInfo, 0, Self.PID);
   Sleep(1000);
   Self.Pong(Self.ParentID);
 end;
