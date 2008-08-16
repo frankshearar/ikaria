@@ -29,8 +29,6 @@ type
 
   TPongActor = class(TActor)
   private
-    Pinger: TProcessID;
-
     function  FindPing(Msg: TActorMessage): Boolean;
     procedure Pong(PID: TProcessID);
     procedure ReactToPing(Msg: TActorMessage);
