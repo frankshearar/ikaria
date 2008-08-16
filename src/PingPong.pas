@@ -139,8 +139,8 @@ end;
 function TPingActor.FindPong(Msg: TActorMessage): Boolean;
 begin
   Result := (Msg.Data.Count > 1)
-        and (Msg.Data[0] is TProcessIDElement)
-        and (Msg.Data[1] is TStringElement)
+        and Msg.Data[0].IsProcessID
+        and Msg.Data[1]IsString
         and (TStringElement(Msg.Data[1]).Value = PongName);
 end;
 

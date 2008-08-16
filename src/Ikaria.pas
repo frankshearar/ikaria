@@ -15,6 +15,11 @@ type
     function AsString: String; virtual;
     function Copy: TTupleElement; virtual;
     function Equals(Other: TTupleElement): Boolean; virtual;
+    function IsBoolean: Boolean; virtual;
+    function IsInteger: Boolean; virtual;
+    function IsProcessID: Boolean; virtual;
+    function IsString: Boolean; virtual;
+    function IsTuple: Boolean; virtual;
   end;
 
   TBooleanElement = class(TTupleElement)
@@ -26,6 +31,7 @@ type
     function AsString: String; override;
     function Copy: TTupleElement; override;
     function Equals(Other: TTupleElement): Boolean; override;
+    function IsBoolean: Boolean; override;
 
     property Value: Boolean read fValue;
   end;
@@ -39,6 +45,7 @@ type
     function AsString: String; override;
     function Copy: TTupleElement; override;
     function Equals(Other: TTupleElement): Boolean; override;
+    function IsInteger: Boolean; override;
 
     property Value: Integer read fValue;
   end;
@@ -52,6 +59,7 @@ type
     function AsString: String; override;
     function Copy: TTupleElement; override;
     function Equals(Other: TTupleElement): Boolean; override;
+    function IsProcessID: Boolean; override;
 
     property Value: TProcessID read fValue;
   end;
@@ -65,6 +73,7 @@ type
     function AsString: String; override;
     function Copy: TTupleElement; override;
     function Equals(Other: TTupleElement): Boolean; override;
+    function IsString: Boolean; override;
 
     property Value: String read fValue;
   end;
@@ -87,6 +96,7 @@ type
     function  Copy: TTupleElement; override;
     function  Count: Integer;
     function  Equals(Other: TTupleElement): Boolean; override;
+    function  IsTuple: Boolean; override;
 
     property Elements[Index: Integer]: TTupleElement read GetElement; default;
   end;
@@ -474,6 +484,31 @@ begin
   Result := Self.ClassType = Other.ClassType;
 end;
 
+function TTupleElement.IsBoolean: Boolean;
+begin
+  Result := false;
+end;
+
+function TTupleElement.IsInteger: Boolean;
+begin
+  Result := false;
+end;
+
+function TTupleElement.IsProcessID: Boolean;
+begin
+  Result := false;
+end;
+
+function TTupleElement.IsString: Boolean;
+begin
+  Result := false;
+end;
+
+function TTupleElement.IsTuple: Boolean;
+begin
+  Result := false;
+end;
+
 //******************************************************************************
 //* TBooleanElement                                                            *
 //******************************************************************************
@@ -500,6 +535,11 @@ function TBooleanElement.Equals(Other: TTupleElement): Boolean;
 begin
   Result := inherited Equals(Other) and
             (Self.Value = TBooleanElement(Other).Value);
+end;
+
+function TBooleanElement.IsBoolean: Boolean;
+begin
+  Result := true;
 end;
 
 //******************************************************************************
@@ -530,6 +570,11 @@ begin
             (Self.Value = TIntegerElement(Other).Value);
 end;
 
+function TIntegerElement.IsInteger: Boolean;
+begin
+  Result := true;
+end;
+
 //******************************************************************************
 //* TProcessIDElement                                                          *
 //******************************************************************************
@@ -558,6 +603,11 @@ begin
             (Self.Value = TProcessIDElement(Other).Value);
 end;
 
+function TProcessIDElement.IsProcessID: Boolean;
+begin
+  Result := true;
+end;
+
 //******************************************************************************
 //* TStringElement                                                             *
 //******************************************************************************
@@ -584,6 +634,11 @@ function TStringElement.Equals(Other: TTupleElement): Boolean;
 begin
   Result := inherited Equals(Other) and
             (Self.Value = TStringElement(Other).Value);
+end;
+
+function TStringElement.IsString: Boolean;
+begin
+  Result := true;
 end;
 
 //******************************************************************************
@@ -679,6 +734,11 @@ begin
         Result := Result and Self[I].Equals(OtherTuple[I]);
     end;
   end;
+end;
+
+function TTuple.IsTuple: Boolean;
+begin
+  Result := true;
 end;
 
 //* TTuple Private methods *****************************************************
@@ -1181,9 +1241,9 @@ begin
   Result := Msg.Data.Count > 1;
 
   if Result then begin
-    Result := (Msg.Data[0] is TStringElement)
+    Result := Msg.Data[0].IsString
            and (TStringElement(Msg.Data[0]).Value = ExitMsg)
-           and (Msg.Data[1] is TStringElement)
+           and Msg.Data[1].IsString
            and (TStringElement(Msg.Data[1]).Value = ExitReasonKill);
   end;
 end;

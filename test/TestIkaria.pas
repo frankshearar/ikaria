@@ -23,7 +23,7 @@ type
                        Severity: Cardinal;
                        EventRef: Cardinal;
                        DebugInfo: String);
-                       
+
     property LogName: String     read fLogName;
     property Description: String read fDescription;
     property SourceRef: Cardinal read fSourceRef;
@@ -42,6 +42,11 @@ type
     procedure TestAsString;
     procedure TestCopy;
     procedure TestEquals;
+    procedure TestIsBoolean;
+    procedure TestIsInteger;
+    procedure TestIsProcessID;
+    procedure TestIsString;
+    procedure TestIsTuple;
     procedure TestValue;
   end;
 
@@ -55,6 +60,11 @@ type
     procedure TestAsString;
     procedure TestCopy;
     procedure TestEquals;
+    procedure TestIsBoolean;
+    procedure TestIsInteger;
+    procedure TestIsProcessID;
+    procedure TestIsString;
+    procedure TestIsTuple;
     procedure TestValue;
   end;
 
@@ -68,6 +78,11 @@ type
     procedure TestAsString;
     procedure TestCopy;
     procedure TestEquals;
+    procedure TestIsBoolean;
+    procedure TestIsInteger;
+    procedure TestIsProcessID;
+    procedure TestIsString;
+    procedure TestIsTuple;
     procedure TestValue;
   end;
 
@@ -81,6 +96,11 @@ type
     procedure TestAsString;
     procedure TestCopy;
     procedure TestEquals;
+    procedure TestIsBoolean;
+    procedure TestIsInteger;
+    procedure TestIsProcessID;
+    procedure TestIsString;
+    procedure TestIsTuple;
     procedure TestValue;
   end;
 
@@ -104,6 +124,11 @@ type
     procedure TestCopy;
     procedure TestEquals;
     procedure TestEqualsOnTree;
+    procedure TestIsBoolean;
+    procedure TestIsInteger;
+    procedure TestIsProcessID;
+    procedure TestIsString;
+    procedure TestIsTuple;
   end;
 
   TestTActorMailbox = class(TTestCase)
@@ -356,6 +381,31 @@ begin
   end;
 end;
 
+procedure TestTBooleanElement.TestIsBoolean;
+begin
+  Check(Self.B.IsBoolean, 'Element not marked as a Boolean');
+end;
+
+procedure TestTBooleanElement.TestIsInteger;
+begin
+  Check(not Self.B.IsInteger, 'Element marked as an Integer');
+end;
+
+procedure TestTBooleanElement.TestIsProcessID;
+begin
+  Check(not Self.B.IsProcessID, 'Element marked as a ProcessID');
+end;
+
+procedure TestTBooleanElement.TestIsString;
+begin
+  Check(not Self.B.IsString, 'Element marked as a String');
+end;
+
+procedure TestTBooleanElement.TestIsTuple;
+begin
+  Check(not Self.B.IsTuple, 'Element marked as a Tuple');
+end;
+
 procedure TestTBooleanElement.TestValue;
 begin
   CheckEquals(true, Self.B.Value, 'Value not set in constructor');
@@ -419,6 +469,31 @@ begin
   finally
     Succ.Free;
   end;
+end;
+
+procedure TestTIntegerElement.TestIsBoolean;
+begin
+  Check(not Self.I.IsBoolean, 'Element marked as a Boolean');
+end;
+
+procedure TestTIntegerElement.TestIsInteger;
+begin
+  Check(Self.I.IsInteger, 'Element not marked as an Integer');
+end;
+
+procedure TestTIntegerElement.TestIsProcessID;
+begin
+  Check(not Self.I.IsProcessID, 'Element marked as a ProcessID');
+end;
+
+procedure TestTIntegerElement.TestIsString;
+begin
+  Check(not Self.I.IsString, 'Element marked as a String');
+end;
+
+procedure TestTIntegerElement.TestIsTuple;
+begin
+  Check(not Self.I.IsTuple, 'Element marked as a Tuple');
 end;
 
 procedure TestTIntegerElement.TestValue;
@@ -486,6 +561,31 @@ begin
   end;
 end;
 
+procedure TestTProcessIDElement.TestIsBoolean;
+begin
+  Check(not Self.PID.IsBoolean, 'Element marked as a Boolean');
+end;
+
+procedure TestTProcessIDElement.TestIsInteger;
+begin
+  Check(not Self.PID.IsInteger, 'Element marked as an Integer');
+end;
+
+procedure TestTProcessIDElement.TestIsProcessID;
+begin
+  Check(Self.PID.IsProcessID, 'Element not marked as a ProcessID');
+end;
+
+procedure TestTProcessIDElement.TestIsString;
+begin
+  Check(not Self.PID.IsString, 'Element marked as a String');
+end;
+
+procedure TestTProcessIDElement.TestIsTuple;
+begin
+  Check(not Self.PID.IsTuple, 'Element marked as a Tuple');
+end;
+
 procedure TestTProcessIDElement.TestValue;
 begin
   CheckEquals('ce39596d-ae9f-442a-8d06-33608840bb96', Self.PID.Value, 'Value not set in constructor');
@@ -549,6 +649,31 @@ begin
   finally
     Same.Free;
   end;
+end;
+
+procedure TestTStringElement.TestIsBoolean;
+begin
+  Check(not Self.S.IsBoolean, 'Element marked as a Boolean');
+end;
+
+procedure TestTStringElement.TestIsInteger;
+begin
+  Check(not Self.S.IsInteger, 'Element marked as an Integer');
+end;
+
+procedure TestTStringElement.TestIsProcessID;
+begin
+  Check(not Self.S.IsProcessID, 'Element marked as a ProcessID');
+end;
+
+procedure TestTStringElement.TestIsString;
+begin
+  Check(Self.S.IsString, 'Element not marked as a String');
+end;
+
+procedure TestTStringElement.TestIsTuple;
+begin
+  Check(not Self.S.IsTuple, 'Element marked as a Tuple');
 end;
 
 procedure TestTStringElement.TestValue;
@@ -774,6 +899,31 @@ begin
   finally
     Same.Free;
   end;
+end;
+
+procedure TestTTuple.TestIsBoolean;
+begin
+  Check(not Self.T.IsBoolean, 'Element marked as a Boolean');
+end;
+
+procedure TestTTuple.TestIsInteger;
+begin
+  Check(not Self.T.IsInteger, 'Element marked as an Integer');
+end;
+
+procedure TestTTuple.TestIsProcessID;
+begin
+  Check(not Self.T.IsProcessID, 'Element marked as a ProcessID');
+end;
+
+procedure TestTTuple.TestIsString;
+begin
+  Check(not Self.T.IsString, 'Element marked as a String');
+end;
+
+procedure TestTTuple.TestIsTuple;
+begin
+  Check(Self.T.IsTuple, 'Element not marked as a Tuple');
 end;
 
 //******************************************************************************
