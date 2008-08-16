@@ -170,6 +170,7 @@ type
     procedure SetUp; override;
     procedure TearDown; override;
   published
+    procedure TestActorAcceptsKillMessage;
   end;
 
 implementation
@@ -1095,6 +1096,17 @@ begin
 end;
 
 //* TestTActor Published methods ***********************************************
+
+procedure TestTActor.TestActorAcceptsKillMessage;
+var
+  PID: TProcessID;
+begin
+  PID := Spawn(TActor);
+  Kill(PID);
+
+  Self.WaitForExit;
+  Check(Self.ActorExited, 'Actor didn''t exit, so didn''t accept the kill');
+end;
 
 initialization;
   Lock := TCriticalSection.Create;

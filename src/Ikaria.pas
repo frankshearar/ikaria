@@ -182,8 +182,11 @@ type
     Mailbox:  TActorMailbox;
     MsgEvent: TEvent;
 
+    function  FindKill(Msg: TActorMessage): Boolean;
     procedure NewMessageArrived(Sender: TObject);
     procedure NullMethod;
+    procedure ReactToKill(Msg: TActorMessage);
+    procedure RegisterRequiredActions(Table: TActorMessageTable);
     procedure WaitForMessage(MillisecondTimeout: Cardinal);
   protected
     MsgTable: TActorMessageTable;
@@ -233,13 +236,18 @@ type
   EActorException = class(Exception);
 
 // Interface to the outside world:
+// Unconditionally kill an Actor. Think hard before using it!
+procedure Kill(Target: TProcessID);
 // Send a message to a particular Actor.
-procedure SendActorMessage(Target: TProcessID; Msg: TActorMessage);
+procedure SendActorMessage(Target: TProcessID; Msg: TTuple);
+// Spawn a new Actor of the given type as a child of the Root Actor, returning
+// its PID.
+function  Spawn(ActorType: TActorClass): TProcessID;
 // Wait for a particular Actor to send you a message matching some Condition.
 function  WaitForMessageFrom(Target: TProcessID; Condition: TMessageFinder): TActorMessage;
 
 const
-  ActorCreatedMsg = 'Actor %s created';
+  ActorCreatedMsg = 'Actor %s created (of type %s)';
   ActorExitedMsg  = 'Actor %s exited with reason %s';
   ActorFreedMsg   = 'Actor %s freed';
   MessageSentMsg  = 'Actor %s sent message to actor %s: %s';
@@ -356,9 +364,10 @@ begin
   end;
 end;
 
-procedure PrimitiveSend(Sender, Target: TProcessID; Msg: TActorMessage);
+procedure PrimitiveSend(Sender, Target: TProcessID; Msg: TTuple);
 var
   Index: Integer;
+  AMsg:   TActorMessage;
 begin
   // Send a message Msg from Sender to Target.
   //
@@ -370,13 +379,20 @@ begin
     try
       Index := Actors.IndexOf(Target);
 
-      if (Index <> -1) then
-        TActor(Actors.Objects[Index]).Mailbox.AddMessage(Msg);
+      if (Index <> -1) then begin
+        AMsg := TActorMessage.Create;
+        try
+          AMsg.Data := Msg.Copy as TTuple;
+          TActor(Actors.Objects[Index]).Mailbox.AddMessage(AMsg);
+
+          NotifyOfMessageSend(Sender, Target, AMsg);
+        finally
+          AMsg.Free;
+        end;
+      end;
     finally
       ActorLock.Release;
     end;
-
-    NotifyOfMessageSend(Sender, Target, Msg);
   finally
     SendLock.Release;
   end;
@@ -401,9 +417,33 @@ end;
 //* Unit Public functions/procedures                                           *
 //******************************************************************************
 
-procedure SendActorMessage(Target: TProcessID; Msg: TActorMessage);
+procedure Kill(Target: TProcessID);
+var
+  Kill: TTuple;
+begin
+  Kill := TTuple.Create;
+  try
+    Kill.AddString(ExitMsg);
+    Kill.AddString(ExitReasonKill);
+
+    SendActorMessage(Target, Kill);
+  finally
+    Kill.Free;
+  end;
+end;
+
+procedure SendActorMessage(Target: TProcessID; Msg: TTuple);
 begin
   PrimitiveSend(TActor.RootActor, Target, Msg);
+end;
+
+function Spawn(ActorType: TActorClass): TProcessID;
+var
+  A: TActor;
+begin
+  A := ActorType.Create(TActor.RootActor);
+  Result := A.PID;
+  A.Resume;
 end;
 
 function WaitForMessageFrom(Target: TProcessID; Condition: TMessageFinder): TActorMessage;
@@ -672,7 +712,7 @@ end;
 
 function TActorMessage.AsString: String;
 begin
-  Result := Format('(message :tag "%s")', [Self.Tag]);
+  Result := Format('(message :tag "%s" :data %s)', [Self.Tag, Self.Data.AsString]);
 end;
 
 function TActorMessage.Copy: TActorMessage;
@@ -936,6 +976,7 @@ begin
 
   Self.MsgEvent := TSimpleEvent.Create;
   Self.MsgTable := TActorMessageTable.Create;
+  Self.RegisterRequiredActions(Self.MsgTable);
   Self.RegisterActions(Self.MsgTable);
 
   Self.fPID := PrimitiveRegisterActor(Self);
@@ -1019,7 +1060,9 @@ begin
       end;
     end;
 
-    Self.WaitForMessage(1000);
+    // If we're terminated, there's no sense waiting.
+    if not Self.Terminated then
+      Self.WaitForMessage(1000);
   end;
 end;
 
@@ -1030,9 +1073,8 @@ end;
 
 procedure TActor.Run;
 begin
-  while not Self.Terminated do begin
+  while not Self.Terminated do
     Self.Receive(Self.MsgTable);
-  end;
 end;
 
 procedure TActor.SendExceptionalExit(E: Exception);
@@ -1094,6 +1136,18 @@ end;
 
 //* TActor Private methods *****************************************************
 
+function TActor.FindKill(Msg: TActorMessage): Boolean;
+begin
+  Result := Msg.Data.Count > 1;
+
+  if Result then begin
+    Result := (Msg.Data[0] is TStringElement)
+           and (TStringElement(Msg.Data[0]).Value = ExitMsg)
+           and (Msg.Data[1] is TStringElement)
+           and (TStringElement(Msg.Data[1]).Value = ExitReasonKill);
+  end;
+end;
+
 procedure TActor.NewMessageArrived(Sender: TObject);
 begin
   // This executes in the context of whatever thread's currently controlling the
@@ -1106,6 +1160,16 @@ end;
 procedure TActor.NullMethod;
 begin
   // Do nothing.
+end;
+
+procedure TActor.ReactToKill(Msg: TActorMessage);
+begin
+  Self.Terminate;
+end;
+
+procedure TActor.RegisterRequiredActions(Table: TActorMessageTable);
+begin
+  Table.Add(Self.FindKill, Self.ReactToKill);
 end;
 
 procedure TActor.WaitForMessage(MillisecondTimeout: Cardinal);
