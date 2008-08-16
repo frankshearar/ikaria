@@ -134,8 +134,8 @@ type
     destructor  Destroy; override;
 
     procedure AddMessage(Msg: TActorMessage);
-    function  IsEmpty: Boolean;
     function  FindMessage(Condition: TMessageFinder): TActorMessage;
+    function  IsEmpty: Boolean;
     procedure Purge;
     procedure Timeout;
 
