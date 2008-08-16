@@ -114,6 +114,8 @@ type
 
   TActOnMessage = procedure(Msg: TActorMessage) of object;
 
+  TActorMessageTable = class;
+
   // I store messages sent to an Actor.
   TActorMailbox = class(TObject)
   private
@@ -134,8 +136,9 @@ type
     destructor  Destroy; override;
 
     procedure AddMessage(Msg: TActorMessage);
-    function  FindMessage(Condition: TMessageFinder): TActorMessage;
     function  IsEmpty: Boolean;
+    procedure FindAndProcessMessage(Table: TActorMessageTable);
+    function  FindMessage(Condition: TMessageFinder): TActorMessage;
     procedure Purge;
     procedure Timeout;
 
@@ -778,6 +781,41 @@ begin
   end;
 end;
 
+procedure TActorMailbox.FindAndProcessMessage(Table: TActorMessageTable);
+var
+  FoundIndex: Integer;
+  FoundMsg:   TActorMessage;
+  I, J:       Integer;
+  M:          TActorMessage;
+begin
+  FoundMsg := nil;
+
+  Self.Lock.Acquire;
+  try
+    FoundIndex := Self.Messages.Count;
+    for I := 0 to Self.Messages.Count - 1 do begin
+      M := Self.MessageAt(I);
+
+      for J := 0 to Table.Count - 1 do begin
+        if Table.Conditions[J](M) then begin
+          FoundIndex := I;
+          FoundMsg := M;
+          Break;
+        end;
+      end;
+
+      if Assigned(FoundMsg) then begin
+        Table.Actions[J](M);
+        Self.FreeMessage(Self.Messages, FoundMsg);
+        Break;
+      end;
+    end;
+    Self.MoveMessages(Self.Messages, Self.SaveQueue, 0, FoundIndex - 1);
+  finally
+    Self.Lock.Release;
+  end;
+end;
+
 function TActorMailbox.FindMessage(Condition: TMessageFinder): TActorMessage;
 var
   FoundIndex: Integer;
@@ -1048,6 +1086,8 @@ begin
   // by the function Matching.
 
   while not Self.Terminated do begin
+    Self.Mailbox.FindAndProcessMessage(Table);
+{
     for I := 0 to Table.Count - 1 do begin
       Msg := Self.Mailbox.FindMessage(Table.Conditions[I]);
       try
@@ -1059,7 +1099,7 @@ begin
         Msg.Free;
       end;
     end;
-
+}
     // If we're terminated, there's no sense waiting.
     if not Self.Terminated then
       Self.WaitForMessage(1000);

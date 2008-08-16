@@ -70,7 +70,7 @@ begin
   Lock.Acquire;
   try
     try
-//      if (Severity > slDebug) then
+      if (Severity > LevelDebug) then
         PingPongDemo.Log.Lines.Add(Description);
     except
       on E: Exception do begin
