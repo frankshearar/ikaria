@@ -248,16 +248,18 @@ type
 
   EActorException = class(Exception);
 
-// Interface to the outside world:
 // Unconditionally kill an Actor. Think hard before using it!
 procedure Kill(Target: TProcessID);
+
 // Send a message to a particular Actor.
 procedure SendActorMessage(Target: TProcessID; Msg: TTuple);
+
 // Spawn a new Actor of the given type as a child of the Root Actor, returning
 // its PID.
-function  Spawn(ActorType: TActorClass): TProcessID;
+function Spawn(ActorType: TActorClass): TProcessID;
+
 // Wait for a particular Actor to send you a message matching some Condition.
-function  WaitForMessageFrom(Target: TProcessID; Condition: TMessageFinder): TActorMessage;
+function WaitForMessageFrom(Target: TProcessID; Condition: TMessageFinder): TActorMessage;
 
 const
   ActorCreatedMsg = 'Actor %s created (of type %s)';
