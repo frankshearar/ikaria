@@ -147,7 +147,8 @@ type
 
     procedure AddMessage(Msg: TActorMessage);
     function  IsEmpty: Boolean;
-    procedure FindAndProcessMessage(Table: TActorMessageTable);
+    function  FindAndProcessMessage(Table: TActorMessageTable;
+                                    var ConditionIndex: Integer): TActorMessage;
     function  FindMessage(Condition: TMessageFinder): TActorMessage;
     procedure Purge;
     procedure Timeout;
@@ -843,14 +844,17 @@ begin
   end;
 end;
 
-procedure TActorMailbox.FindAndProcessMessage(Table: TActorMessageTable);
+function  TActorMailbox.FindAndProcessMessage(Table: TActorMessageTable;
+                                              var ConditionIndex: Integer): TActorMessage;
 var
   FoundIndex: Integer;
   FoundMsg:   TActorMessage;
   I, J:       Integer;
   M:          TActorMessage;
 begin
-  FoundMsg := nil;
+  ConditionIndex := -1;
+  FoundMsg       := nil;
+  Result         := nil;
 
   Self.Lock.Acquire;
   try
@@ -867,7 +871,8 @@ begin
       end;
 
       if Assigned(FoundMsg) then begin
-        Table.Actions[J](M);
+        ConditionIndex := J;
+        Result := FoundMsg.Copy;
         Self.FreeMessage(Self.Messages, FoundMsg);
         Break;
       end;
@@ -1148,20 +1153,14 @@ begin
   // by the function Matching.
 
   while not Self.Terminated do begin
-    Self.Mailbox.FindAndProcessMessage(Table);
-{
-    for I := 0 to Table.Count - 1 do begin
-      Msg := Self.Mailbox.FindMessage(Table.Conditions[I]);
-      try
-        if Assigned(Msg) then begin
-          Table.Actions[I](Msg);
-          Break;
-        end;
-      finally
-        Msg.Free;
-      end;
+    Msg := Self.Mailbox.FindAndProcessMessage(Table, I);
+    try
+      if Assigned(Msg) then
+        Table.Actions[I](Msg);
+    finally
+      Msg.Free;
     end;
-}
+
     // If we're terminated, there's no sense waiting.
     if not Self.Terminated then
       Self.WaitForMessage(1000);
