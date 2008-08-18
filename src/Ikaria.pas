@@ -252,6 +252,10 @@ type
 // Unconditionally kill an Actor. Think hard before using it!
 procedure Kill(Target: TProcessID);
 
+// Send a message to a particular actor, and wait for a response. Return the
+// response, or fail after a timeout.
+function RPC(Target: TProcessID; Msg: TTuple; Timeout: Cardinal): TTuple;
+
 // Send a message to a particular Actor.
 procedure SendActorMessage(Target: TProcessID; Msg: TTuple);
 
@@ -445,6 +449,54 @@ begin
     SendActorMessage(Target, Kill);
   finally
     Kill.Free;
+  end;
+end;
+
+function RPC(Target: TProcessID; Msg: TTuple; Timeout: Cardinal): TTuple;
+const
+  OneMillisecond = 1/86400/1000; // One Millisecond in TDateTime format.
+var
+  E:        TEvent;
+  EndTime:  TDateTime;
+  ProxyMsg: TTuple;
+  Wait:     TWaitResult;
+begin
+  // Ikaria keeps a pool of mutexes. When you call RPC, it reserves one of these
+  // mutexes (call it E). It then asks the RootActor to forward Msg on to the
+  // Target actor. RPC then busy-waits. If RPC waits for longer than Timeout
+  // milliseconds, it raises an ETimeout exception. When RootActor receives a
+  // response from Target, it sets E
+
+  Result := nil;
+
+  EndTime := Now + Timeout*OneMillisecond;
+  E := ReserveEvent;
+  try
+    ProxyMsg := TTuple.Create;
+    try
+      ProxyMsg.AddProcessID(PIDFor(E));
+      ProxyMsg.Add(Msg);
+    finally
+      ProxyMsg.Free;
+    end;
+
+    while (Now < EndTime) do begin
+      Wait := E.WaitFor(1000);
+
+      case Wait of
+        wrSignaled: begin
+          // We received a response: return it.
+          Result := DataFor(E).Copy;
+          Break;
+        wrTimeout:;
+      else
+        raise ETimeout
+      end;
+
+
+    end;
+  finally
+    UnreserveEvent(E);
   end;
 end;
 
