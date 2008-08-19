@@ -185,6 +185,7 @@ type
     ExitEvent:   TEvent;
     LastSentMsg: TActorMessage;
     MsgEvent:    TEvent;
+    TestMsg:     TTuple;
 
     procedure NotifyOfExit(PID: String; Reason: TTuple);
     procedure StoreLastSentMessage(Sender, Target: TProcessID; Msg: TActorMessage);
@@ -196,7 +197,21 @@ type
     procedure TearDown; override;
   published
     procedure TestActorAcceptsKillMessage;
+    procedure TestActorsCanReceiveMessages;
   end;
+
+  TestActorFunctions = class(TTestCase)
+  private
+    TestMsg: TTuple;
+  public
+    procedure SetUp; override;
+    procedure TearDown; override;
+  published
+    procedure TestRPC;
+  end;
+
+const
+  TestName = 'test';
 
 implementation
 
@@ -204,6 +219,14 @@ uses
   Contnrs;
 
 type
+  TEchoActor = class(TActor)
+  private
+    function  FindAllExceptKill(Msg: TActorMessage): Boolean;
+    procedure EchoMessage(Msg: TActorMessage);
+  protected
+    procedure RegisterActions(Table: TActorMessageTable); override;
+  end;
+
   TSingleShotActor = class(TActor)
   protected
     procedure Run; override;
@@ -274,6 +297,31 @@ begin
   Result.AddSuite(TestTActorMailbox.Suite);
   Result.AddSuite(TestTActorMessageTable.Suite);
   Result.AddSuite(TestTActor.Suite);
+  Result.AddSuite(TestActorFunctions.Suite);
+end;
+
+//******************************************************************************
+//* TEchoActor                                                                 *
+//******************************************************************************
+//* TEchoActor Protected methods ***********************************************
+
+procedure TEchoActor.RegisterActions(Table: TActorMessageTable);
+begin
+  inherited RegisterActions(Table);
+
+  Table.Add(Self.FindAllExceptKill, Self.EchoMessage);
+end;
+
+//* TEchoActor Private methods *************************************************
+
+function TEchoActor.FindAllExceptKill(Msg: TActorMessage): Boolean;
+begin
+  Result := not Self.FindKill(Msg);
+end;
+
+procedure TEchoActor.EchoMessage(Msg: TActorMessage);
+begin
+  Self.Send(TProcessIDElement(Msg.Data[0]).Value, Msg.Data);
 end;
 
 //******************************************************************************
@@ -1194,6 +1242,10 @@ begin
   Self.ExitEvent := TSimpleEvent.Create;
   Self.MsgEvent  := TSimpleEvent.Create;
 
+  Self.TestMsg := TTuple.Create;
+  Self.TestMsg.AddProcessID('');
+  Self.TestMsg.AddString(TestName);
+
   OnActorExitedHook := NotifyOfActorExit;
   OnMessageSentHook := StoreLastSentMessageInTestCase;
   Self.ActorExited  := false;
@@ -1204,6 +1256,7 @@ procedure TestTActor.TearDown;
 begin
   RunningTestCase := nil;
 
+  Self.TestMsg.Free;
   Self.MsgEvent.Free;
   Self.LastSentMsg.Free;
   Self.ExitEvent.Free;
@@ -1254,6 +1307,62 @@ begin
 
   Self.WaitForExit;
   Check(Self.ActorExited, 'Actor didn''t exit, so didn''t accept the kill');
+end;
+
+procedure TestTActor.TestActorsCanReceiveMessages;
+var
+  PID:     TProcessID;
+begin
+  PID := Spawn(TEchoActor);
+  try
+    SendActorMessage(PID, Self.TestMsg);
+    Self.WaitForMsg(1000);
+    CheckEquals(TestMsg.AsString, Self.LastSentMsg.Data.AsString,
+                'Echo process didn''t send a message, hence didn''t receive one');
+  finally
+    Kill(PID);
+  end;
+end;
+
+//******************************************************************************
+//* TestActorFunctions                                                         *
+//******************************************************************************
+//* TestActorFunctions Public methods ******************************************
+
+procedure TestActorFunctions.SetUp;
+begin
+  inherited SetUp;
+
+  Self.TestMsg := TTuple.Create;
+  Self.TestMsg.AddProcessID(TActor.RootActor);
+  Self.TestMsg.AddString(TestName);
+end;
+
+procedure TestActorFunctions.TearDown;
+begin
+  Self.TestMsg.Free;
+
+  inherited TearDown;
+end;
+
+//* TestActorFunctions Published methods ***************************************
+
+procedure TestActorFunctions.TestRPC;
+var
+  Echo:   TProcessID;
+  Result: TTuple;
+begin
+  Echo := Spawn(TEchoActor);
+  try
+    Result := RPC(Echo, Self.TestMsg, 1000);
+    try
+      CheckEquals(Self.TestMsg.AsString, Result.AsString, 'RPC didn''t return expected result');
+    finally
+      Result.Free;
+    end;
+  finally
+    Kill(Echo);
+  end;
 end;
 
 initialization;

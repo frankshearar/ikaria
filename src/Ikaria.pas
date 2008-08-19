@@ -196,7 +196,6 @@ type
     Mailbox:  TActorMailbox;
     MsgEvent: TEvent;
 
-    function  FindKill(Msg: TActorMessage): Boolean;
     procedure NewMessageArrived(Sender: TObject);
     procedure NullMethod;
     procedure ReactToKill(Msg: TActorMessage);
@@ -207,6 +206,7 @@ type
     ParentID: TProcessID;
 
     procedure Execute; override;
+    function  FindKill(Msg: TActorMessage): Boolean;
     procedure Receive(Matching: TMessageFinder;
                       Action: TActOnMessage); overload;
     procedure Receive(Matching: TMessageFinder;
@@ -251,6 +251,18 @@ type
   TEventDictionary = class(TObject)
   end;
 
+  // Among other things, the Root Actor provides a way for non-Actor things to
+  // send messages to and receive messages from Actors. It does this by acting
+  // as a proxy: The RPC function sends a special message of the form
+  // (<ID> "proxy-msg" <Target_PID> <actual_msg>) to the Root Actor, where <ID>
+  // identifies a mutex and <actual_msg> is the message to be sent to the final
+  // target.
+  //
+  // Usually, messages to Actors will have as their first element a PID
+  // indicating the Actor expecting a response. Thus, <actual_msg> must be a
+  // tuple whose first element contains the Root Actor's PID, so that the
+  // response goes back to the Root Actor. When the Root Actor receives this
+  // response, it then sets the mutex identified by <ID>, and RPC returns.
   TRootActor = class(TActor)
   private
     fEvents: TEventDictionary;
@@ -482,7 +494,7 @@ end;
 
 procedure UnreserveEvent(E: TEvent);
 begin
-
+  // Do nothing for now.
 end;
 
 //******************************************************************************
@@ -510,6 +522,7 @@ const
 var
   E:        TEvent;
   EndTime:  TDateTime;
+  ErrorMsg: String;
   ProxyMsg: TTuple;
   Wait:     TWaitResult;
 begin
@@ -528,6 +541,7 @@ begin
     try
       ProxyMsg.AddProcessID(PIDFor(E));
       ProxyMsg.AddString(RpcProxyMsg);
+      ProxyMsg.AddProcessID(Target);
       ProxyMsg.Add(Msg);
 
       PrimitiveSend(TActor.RootActor, TActor.RootActor, ProxyMsg);
@@ -546,12 +560,17 @@ begin
         end;
         wrTimeout:;
       else
-        raise ETimeout.Create('Something meaningful');
+        if (Wait = wrError) then
+          ErrorMsg := SysErrorMessage(E.LastError)
+        else // wrAbandoned
+          ErrorMsg := 'Event abandoned';
+
+        raise ETimeout.Create(Format('Unexpected result waiting for response to message %s: %s', [Msg.AsString, ErrorMsg]));
       end;
     end;
 
     if not Assigned(Result) then
-      raise ETimeout.Create('Something meaningful');
+      raise ETimeout.Create(Format('Timeout waiting for response to message %s', [Msg.AsString]));
   finally
     UnreserveEvent(E);
   end;
@@ -1224,6 +1243,18 @@ begin
   end;
 end;
 
+function TActor.FindKill(Msg: TActorMessage): Boolean;
+begin
+  Result := Msg.Data.Count > 1;
+
+  if Result then begin
+    Result := Msg.Data[0].IsString
+           and (TStringElement(Msg.Data[0]).Value = ExitMsg)
+           and Msg.Data[1].IsString
+           and (TStringElement(Msg.Data[1]).Value = ExitReasonKill);
+  end;
+end;
+
 procedure TActor.Receive(Matching: TMessageFinder;
                          Action: TActOnMessage);
 begin
@@ -1346,18 +1377,6 @@ end;
 
 //* TActor Private methods *****************************************************
 
-function TActor.FindKill(Msg: TActorMessage): Boolean;
-begin
-  Result := Msg.Data.Count > 1;
-
-  if Result then begin
-    Result := Msg.Data[0].IsString
-           and (TStringElement(Msg.Data[0]).Value = ExitMsg)
-           and Msg.Data[1].IsString
-           and (TStringElement(Msg.Data[1]).Value = ExitReasonKill);
-  end;
-end;
-
 procedure TActor.NewMessageArrived(Sender: TObject);
 begin
   // This executes in the context of whatever thread's currently controlling the
@@ -1435,8 +1454,13 @@ end;
 
 function TRootActor.FindProxy(Msg: TActorMessage): Boolean;
 begin
-  Result := (Msg.Data.Count > 1)
-        and (TStringElement(Msg.Data[1]).Value = RpcProxyMsg);
+  // (<ID> "proxy-msg" <Target_PID> <actual_msg>)
+  Result := (Msg.Data.Count > 3)
+        and Msg.Data[0].IsProcessID
+        and Msg.Data[1].IsString
+        and (TStringElement(Msg.Data[1]).Value = RpcProxyMsg)
+        and Msg.Data[2].IsProcessID
+        and Msg.Data[3].IsTuple;
 end;
 
 function TRootActor.FindResponse(Msg: TActorMessage): Boolean;
