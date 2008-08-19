@@ -234,8 +234,6 @@ begin
 end;
 
 procedure PurgeLog;
-var
-  I: Integer;
 begin
   Lock.Acquire;
   try
