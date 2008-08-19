@@ -332,7 +332,6 @@ var
   Actors:    TStringList;
   Root:      TActor;
   ActorLock: TCriticalSection; // Used to lock access to Actors.
-  SendLock:  TCriticalSection; // Used to synchronise the sending of messages to mailboxes.
   UsedPIDs:  TStringList;
   TempData:  TTuple;
   TempEvent: TEvent;
@@ -441,28 +440,23 @@ begin
   //
   // It doesn't matter whether there is an actor with mail address Target.
 
-  SendLock.Acquire;
+  ActorLock.Acquire;
   try
-    ActorLock.Acquire;
-    try
-      Index := Actors.IndexOf(Target);
+    Index := Actors.IndexOf(Target);
 
-      if (Index <> -1) then begin
-        AMsg := TActorMessage.Create;
-        try
-          AMsg.Data := Msg.Copy as TTuple;
-          TActor(Actors.Objects[Index]).Mailbox.AddMessage(AMsg);
+    if (Index <> -1) then begin
+      AMsg := TActorMessage.Create;
+      try
+        AMsg.Data := Msg.Copy as TTuple;
+        TActor(Actors.Objects[Index]).Mailbox.AddMessage(AMsg);
 
-          NotifyOfMessageSend(Sender, Target, AMsg);
-        finally
-          AMsg.Free;
-        end;
+        NotifyOfMessageSend(Sender, Target, AMsg);
+      finally
+        AMsg.Free;
       end;
-    finally
-      ActorLock.Release;
     end;
   finally
-    SendLock.Release;
+    ActorLock.Release;
   end;
 end;
 
@@ -1503,7 +1497,6 @@ end;
 initialization
   ActorLock := TCriticalSection.Create;
   Actors    := TStringList.Create;
-  SendLock  := TCriticalSection.Create;
   UsedPIDs  := TStringList.Create;
 
   TempEvent := TSimpleEvent.Create;
