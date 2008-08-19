@@ -232,9 +232,40 @@ type
     property PID: TProcessID read fPID;
   end;
 
+  TEventMapping = class(TObject)
+  private
+    fEvent:  TEvent;
+    fPID:    TProcessID;
+    fResult: TTuple;
+  public
+    constructor Create(Event: TEvent; PID: TProcessID);
+
+    function  HasResult: Boolean;
+    procedure SetResult(Value: TTuple);
+
+    property Event:  TEvent     read fEvent;
+    property PID:    TProcessID read fPID;
+    property Result: TTuple     read fResult;
+  end;
+
+  TEventDictionary = class(TObject)
+  end;
+
   TRootActor = class(TActor)
+  private
+    fEvents: TEventDictionary;
+
+    function  FindProxy(Msg: TActorMessage): Boolean;
+    function  FindResponse(Msg: TActorMessage): Boolean;
+    procedure ProxyMsg(Msg: TActorMessage);
+    procedure RelayResponse(Msg: TActorMessage);
   protected
-    procedure Run; override;
+    procedure RegisterActions(Table: TActorMessageTable); override;
+  public
+    constructor Create(Parent: TProcessID); override;
+    destructor  Destroy; override;
+
+    property Events: TEventDictionary read fEvents;
   end;
 
   // I translate messages sent to me into PostMessages to a Windows message
@@ -248,6 +279,7 @@ type
   end;
 
   EActorException = class(Exception);
+  ETimeout = class(Exception);
 
 // Unconditionally kill an Actor. Think hard before using it!
 procedure Kill(Target: TProcessID);
@@ -277,6 +309,7 @@ const
   ExitReasonException = '%s: %s';
   ExitReasonNormal    = 'normal';
   ExitReasonKill       = 'kill';
+  RpcProxyMsg          = 'rpc-proxy';
 
 // String conversion
 const
@@ -301,6 +334,11 @@ var
   ActorLock: TCriticalSection; // Used to lock access to Actors.
   SendLock:  TCriticalSection; // Used to synchronise the sending of messages to mailboxes.
   UsedPIDs:  TStringList;
+  TempData:  TTuple;
+  TempEvent: TEvent;
+
+const
+  TempEventPID = '86657b58-6e06-4b02-8469-b7d6f1ee652f';
 
 // Tag generation
 var
@@ -322,6 +360,11 @@ var
 begin
   CreateGUID(NewGuid);
   Result := Lowercase(WithoutFirstAndLastChars(GUIDToString(NewGuid)));
+end;
+
+function DataFor(E: TEvent): TTuple;
+begin
+  Result := TempData;
 end;
 
 function NextPID: TProcessID;
@@ -366,6 +409,11 @@ begin
   finally
     TagLock.Release;
   end;
+end;
+
+function PIDFor(E: Tevent): TProcessID;
+begin
+  Result := TempEventPID;
 end;
 
 procedure PrimitiveReceive(Target: TProcessID; Msg: TActorMessage);
@@ -433,6 +481,16 @@ begin
   end;
 end;
 
+function ReserveEvent: TEvent;
+begin
+  Result := TempEvent;
+end;
+
+procedure UnreserveEvent(E: TEvent);
+begin
+
+end;
+
 //******************************************************************************
 //* Unit Public functions/procedures                                           *
 //******************************************************************************
@@ -475,7 +533,10 @@ begin
     ProxyMsg := TTuple.Create;
     try
       ProxyMsg.AddProcessID(PIDFor(E));
+      ProxyMsg.AddString(RpcProxyMsg);
       ProxyMsg.Add(Msg);
+
+      PrimitiveSend(TActor.RootActor, TActor.RootActor, ProxyMsg);
     finally
       ProxyMsg.Free;
     end;
@@ -486,15 +547,17 @@ begin
       case Wait of
         wrSignaled: begin
           // We received a response: return it.
-          Result := DataFor(E).Copy;
+          Result := DataFor(E).Copy as TTuple;
           Break;
+        end;
         wrTimeout:;
       else
-        raise ETimeout
+        raise ETimeout.Create('Something meaningful');
       end;
-
-
     end;
+
+    if not Assigned(Result) then
+      raise ETimeout.Create('Something meaningful');
   finally
     UnreserveEvent(E);
   end;
@@ -1332,14 +1395,83 @@ begin
 end;
 
 //******************************************************************************
+//* TEventMapping                                                              *
+//******************************************************************************
+//* TEventMapping Public methods ***********************************************
+
+constructor TEventMapping.Create(Event: TEvent; PID: TProcessID);
+begin
+  inherited Create;
+
+  Self.fEvent := Event;
+  Self.fPID   := PID;
+end;
+
+function TEventMapping.HasResult: Boolean;
+begin
+  Result := Assigned(Self.Result);
+end;
+
+procedure TEventMapping.SetResult(Value: TTuple);
+begin
+  if not Assigned(Self.fResult) then
+    Self.fResult := Value.Copy as TTuple;
+end;
+
+//******************************************************************************
 //* TRootActor                                                                 *
 //******************************************************************************
 //* TRootActor Public methods **************************************************
 
-procedure TRootActor.Run;
+constructor TRootActor.Create(Parent: TProcessID);
 begin
-  while not Terminated do
-    Sleep(1000);
+  inherited Create(Parent);
+
+  Self.fEvents := TEventDictionary.Create;
+end;
+
+destructor TRootActor.Destroy;
+begin
+  Self.fEvents.Free;
+
+  inherited Destroy;
+end;
+
+//* TRootActor Protected methods ***********************************************
+
+function TRootActor.FindProxy(Msg: TActorMessage): Boolean;
+begin
+  Result := (Msg.Data.Count > 1)
+        and (TStringElement(Msg.Data[1]).Value = RpcProxyMsg);
+end;
+
+function TRootActor.FindResponse(Msg: TActorMessage): Boolean;
+begin
+  Result := not Self.FindProxy(Msg);
+end;
+
+procedure TRootActor.ProxyMsg(Msg: TActorMessage);
+begin
+  Self.Send(TStringElement(Msg.Data[0]).Value, TTuple(Msg.Data[2]));
+end;
+
+procedure TRootActor.RelayResponse(Msg: TActorMessage);
+begin
+  // * Store the response in the event dictionary.
+  // * Set the associated event.
+
+  if Assigned(TempData) then
+    TempData.Free;
+  TempData := Msg.Data.Copy as TTuple;
+  TempEvent.SetEvent;
+end;
+
+//* TRootActor Private methods *************************************************
+
+procedure TRootActor.RegisterActions(Table: TActorMessageTable);
+begin
+  Table.Add(Self.FindProxy, Self.ProxyMsg);
+  Table.Add(Self.FindResponse, Self.RelayResponse);
 end;
 
 //******************************************************************************
@@ -1373,6 +1505,8 @@ initialization
   Actors    := TStringList.Create;
   SendLock  := TCriticalSection.Create;
   UsedPIDs  := TStringList.Create;
+
+  TempEvent := TSimpleEvent.Create;
 
   // Tag generation
   NextAvailableTag := 0;

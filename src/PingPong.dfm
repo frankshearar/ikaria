@@ -21,14 +21,32 @@ object PingPongDemo: TPingPongDemo
     Align = alTop
     BevelOuter = bvNone
     TabOrder = 0
-    object Go: TButton
+    object StartPing: TButton
       Left = 0
       Top = 0
       Width = 75
       Height = 25
-      Caption = 'Go'
+      Caption = 'Start Ping'
       TabOrder = 0
-      OnClick = GoClick
+      OnClick = StartPingClick
+    end
+    object StopPing: TButton
+      Left = 74
+      Top = 0
+      Width = 75
+      Height = 25
+      Caption = 'Stop Ping'
+      TabOrder = 1
+      OnClick = StopPingClick
+    end
+    object NextFib: TButton
+      Left = 148
+      Top = 0
+      Width = 80
+      Height = 25
+      Caption = 'Next Fibonacci'
+      TabOrder = 2
+      OnClick = NextFibClick
     end
   end
   object Log: TMemo

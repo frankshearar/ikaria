@@ -8,9 +8,16 @@ uses
 type
   TPingPongDemo = class(TForm)
     Panel1: TPanel;
-    Go: TButton;
+    StartPing: TButton;
     Log: TMemo;
-    procedure GoClick(Sender: TObject);
+    StopPing: TButton;
+    NextFib: TButton;
+    procedure StartPingClick(Sender: TObject);
+    procedure StopPingClick(Sender: TObject);
+    procedure NextFibClick(Sender: TObject);
+  private
+    NextFibber: TProcessID;
+    Pinger:     TProcessID;
   public
     constructor Create(AOwner: TComponent); override;
   end;
@@ -36,6 +43,20 @@ type
     procedure RegisterActions(Table: TActorMessageTable); override;
   end;
 
+  TFibonacciActor = class(TActor)
+  private
+    CurrentNumber: Integer;
+    LastFib:       Integer;
+    SecondLastFib: Integer;
+
+    function  FindNext(Msg: TActorMessage): Boolean;
+    procedure ReturnNextFibonacci(Msg: TActorMessage);
+  protected
+    procedure RegisterActions(Table: TActorMessageTable); override;
+  public
+    constructor Create(Parent: TProcessID); override;
+  end;
+
 var
   PingPongDemo: TPingPongDemo;
 
@@ -49,6 +70,7 @@ uses
 const
   LevelDebug = 0;
   LevelInfo  = 1;
+  NextName   = 'next';
   PingName   = 'ping';
   PongName   = 'pong';
 
@@ -114,12 +136,38 @@ end;
 
 //* TPingPongDemo Published methods ********************************************
 
-procedure TPingPongDemo.GoClick(Sender: TObject);
+procedure TPingPongDemo.NextFibClick(Sender: TObject);
 var
-  P: TActor;
+  AskForNext: TTuple;
+  Next:       TTuple;
 begin
-  P := TPingActor.Create('');
-  P.Resume;
+  if (Self.NextFibber = '') then
+    Self.NextFibber := Spawn(TFibonacciActor);
+
+  AskForNext := TTuple.Create;
+  try
+     AskForNext.AddProcessID(TActor.RootActor);
+     AskForNext.AddString(NextName);
+
+    Next := RPC(Self.NextFibber, AskForNext, 100000);
+    try
+      Self.Log.Lines.Add(IntToStr(TIntegerElement(Next[0]).Value));
+    finally
+      Next.Free;
+    end;
+  finally
+    AskForNext.Free;
+  end;
+end;
+
+procedure TPingPongDemo.StartPingClick(Sender: TObject);
+begin
+  Self.Pinger := Spawn(TPingActor);
+end;
+
+procedure TPingPongDemo.StopPingClick(Sender: TObject);
+begin
+  Kill(Self.Pinger);
 end;
 
 //******************************************************************************
@@ -214,6 +262,59 @@ begin
   LogToDemo('', PingName, 0, 'PingPongDemo', LevelInfo, 0, Self.PID);
   Sleep(1000);
   Self.Pong(Self.ParentID);
+end;
+
+//******************************************************************************
+//* TFibonacciActor                                                            *
+//******************************************************************************
+//* TFibonacciActor Public methods *********************************************
+
+constructor TFibonacciActor.Create(Parent: TProcessID);
+begin
+  inherited Create(Parent);
+
+  Self.CurrentNumber := 0;
+  Self.SecondLastFib := 0;
+  Self.LastFib       := 0;
+end;
+
+//* TFibonacciActor Protected methods ******************************************
+
+procedure TFibonacciActor.RegisterActions(Table: TActorMessageTable);
+begin
+  Table.Add(Self.FindNext, Self.ReturnNextFibonacci);
+end;
+
+//* TFibonacciActor Private methods ********************************************
+
+function TFibonacciActor.FindNext(Msg: TActorMessage): Boolean;
+begin
+  Result := (Msg.Data.Count > 1)
+         and Msg.Data[1].IsString
+         and (TStringElement(Msg.Data[1]).Value = NextName)
+end;
+
+procedure TFibonacciActor.ReturnNextFibonacci(Msg: TActorMessage);
+var
+  Answer: TTuple;
+begin
+  Self.SecondLastFib := Self.LastFib;
+  Self.LastFib       := Self.CurrentNumber;
+
+  if (Self.SecondLastFib = 0) and (Self.LastFib = 0) then
+    Self.CurrentNumber := 1
+  else if (Self.SecondLastFib = 0) and (Self.LastFib = 1) then
+    Self.CurrentNumber := 1
+  else
+    Self.CurrentNumber := Self.LastFib + Self.SecondLastFib;
+
+  Answer := TTuple.Create;
+  try
+    Answer.AddInteger(Self.CurrentNumber);
+    Self.Send(TProcessIDElement(Msg.Data[0]).Value, Answer);
+  finally
+    Answer.Free;
+  end;
 end;
 
 initialization
