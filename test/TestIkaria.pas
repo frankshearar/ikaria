@@ -1356,6 +1356,7 @@ var
 begin
   AnotherTest := TTuple.Create;
   try
+    AnotherTest.AddProcessID(TRootActor.RootActor);
     AnotherTest.AddProcessID(ConstructUUID);
 
     Echo := Spawn(TEchoActor);
