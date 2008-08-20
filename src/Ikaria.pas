@@ -427,10 +427,6 @@ begin
   Result := TempEventPID;
 end;
 
-procedure PrimitiveReceive(Target: TProcessID; Msg: TActorMessage);
-begin
-end;
-
 function PrimitiveRegisterActor(A: TActor): TProcessID;
 begin
   ActorLock.Acquire;
