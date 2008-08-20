@@ -1,5 +1,15 @@
 unit Ikaria;
 
+
+// TODO:
+// * function Spawn(Lambda: TThunk): TProcessID;
+// * function TActor.SpawnLink(Actor: TActor): TProcessID;
+// * Propogating exits to the link set of an Actor
+// * Trapping of exits (when a flag is set)
+// * Parallel map: take an array and a function to be applied to each element in
+//   the array, and fork/join the processing, a la mapreduce.
+// * "Futures"?
+
 interface
 
 uses
