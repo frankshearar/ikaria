@@ -450,31 +450,35 @@ begin
 end;
 
 procedure PrimitiveSend(Sender, Target: TProcessID; Msg: TTuple);
-var
-  Index: Integer;
-  AMsg:   TActorMessage;
+  procedure DeliverMsg(Target: TProcessID; Msg: TActorMessage);
+  var
+    Index: Integer;
+    AMsg:  TActorMessage;
+  begin
+    ActorLock.Acquire;
+    try
+      Index := Actors.IndexOf(Target);
+
+      if (Index <> -1) then
+        TActor(Actors.Objects[Index]).Mailbox.AddMessage(AMsg);
+    finally
+      ActorLock.Release;
+    end;
+  end;
 begin
   // Send a message Msg from Sender to Target.
   //
   // It doesn't matter whether there is an actor with mail address Target.
 
-  ActorLock.Acquire;
+  AMsg := TActorMessage.Create;
   try
-    Index := Actors.IndexOf(Target);
+    AMsg.Data := Msg.Copy as TTuple;
 
-    if (Index <> -1) then begin
-      AMsg := TActorMessage.Create;
-      try
-        AMsg.Data := Msg.Copy as TTuple;
-        TActor(Actors.Objects[Index]).Mailbox.AddMessage(AMsg);
+    DeliverMsg(Target, AMsg);
 
-        NotifyOfMessageSend(Sender, Target, AMsg);
-      finally
-        AMsg.Free;
-      end;
-    end;
+    NotifyOfMessageSend(Sender, Target, AMsg);
   finally
-    ActorLock.Release;
+    AMsg.Free;
   end;
 end;
 
