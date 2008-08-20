@@ -474,14 +474,13 @@ procedure PrimitiveSend(Sender, Target: TProcessID; Msg: TTuple);
   procedure DeliverMsg(Target: TProcessID; Msg: TActorMessage);
   var
     Index: Integer;
-    AMsg:  TActorMessage;
   begin
     ActorLock.Acquire;
     try
       Index := Actors.IndexOf(Target);
 
       if (Index <> -1) then
-        TActor(Actors.Objects[Index]).Mailbox.AddMessage(AMsg);
+        TActor(Actors.Objects[Index]).Mailbox.AddMessage(Msg);
     finally
       ActorLock.Release;
     end;
