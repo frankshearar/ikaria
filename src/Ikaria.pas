@@ -111,6 +111,19 @@ type
     property Elements[Index: Integer]: TTupleElement read GetElement; default;
   end;
 
+  TRpcProxyTuple = class(TTuple)
+  private
+    function GetEventPID: String;
+    function GetMessage: TTuple;
+    function GetTargetPID: String;
+  public
+    constructor Create(EventPID, TargetPID: TProcessID; Message: TTuple);
+
+    property EventPID:  String read GetEventPID;
+    property Message:   TTuple read GetMessage;
+    property TargetPID: String read GetTargetPID;
+  end;
+
   // I represent a message sent to an Actor.
   //
   // I will free the Data you give me.
@@ -259,6 +272,11 @@ type
   end;
 
   TEventDictionary = class(TObject)
+  private
+    Events: TObjectList;
+  public
+    constructor Create;
+    destructor  Destroy; override;
   end;
 
   // Among other things, the Root Actor provides a way for non-Actor things to
@@ -533,27 +551,22 @@ var
   E:        TEvent;
   EndTime:  TDateTime;
   ErrorMsg: String;
-  ProxyMsg: TTuple;
+  ProxyMsg: TRpcProxyTuple;
   Wait:     TWaitResult;
 begin
   // Ikaria keeps a pool of mutexes. When you call RPC, it reserves one of these
   // mutexes (call it E). It then asks the RootActor to forward Msg on to the
   // Target actor. RPC then busy-waits. If RPC waits for longer than Timeout
   // milliseconds, it raises an ETimeout exception. When RootActor receives a
-  // response from Target, it sets E
+  // response from Target, it sets E.
 
   Result := nil;
 
   EndTime := Now + Timeout*OneMillisecond;
   E := ReserveEvent;
   try
-    ProxyMsg := TTuple.Create;
+    ProxyMsg := TRpcProxyTuple.Create(PIDFor(E), Target, Msg);
     try
-      ProxyMsg.AddProcessID(PIDFor(E));
-      ProxyMsg.AddString(RpcProxyMsg);
-      ProxyMsg.AddProcessID(Target);
-      ProxyMsg.Add(Msg);
-
       PrimitiveSend(TActor.RootActor, TActor.RootActor, ProxyMsg);
     finally
       ProxyMsg.Free;
@@ -887,6 +900,38 @@ end;
 function TTuple.GetElement(Index: Integer): TTupleElement;
 begin
   Result := Self.TupleElements[Index] as TTupleElement;
+end;
+
+//******************************************************************************
+//* TRpcProxyTuple                                                             *
+//******************************************************************************
+//* TRpcProxyTuple Public methods **********************************************
+
+constructor TRpcProxyTuple.Create(EventPID, TargetPID: TProcessID; Message: TTuple);
+begin
+  inherited Create;
+
+  Self.AddProcessID(EventPID);
+  Self.AddString(RpcProxyMsg);
+  Self.AddProcessID(TargetPID);
+  Self.Add(Message);
+end;
+
+//* TRpcProxyTuple Private methods *********************************************
+
+function TRpcProxyTuple.GetEventPID: String;
+begin
+  Result := TStringElement(Self[0]).Value;
+end;
+
+function TRpcProxyTuple.GetMessage: TTuple;
+begin
+  Result := TTuple(Self[3]);
+end;
+
+function TRpcProxyTuple.GetTargetPID: String;
+begin
+  Result := TStringElement(Self[2]).Value;
 end;
 
 //******************************************************************************
@@ -1479,8 +1524,14 @@ begin
 end;
 
 procedure TRootActor.ProxyMsg(Msg: TActorMessage);
+var
+  ActualMsg: TTuple;
+  Target: String;
 begin
-  Self.Send(TStringElement(Msg.Data[0]).Value, TTuple(Msg.Data[2]));
+  ActualMsg := TTuple(Msg.Data[3]);
+  Target    := TStringElement(Msg.Data[2]).Value;
+
+  Self.Send(Target, ActualMsg);
 end;
 
 procedure TRootActor.RelayResponse(Msg: TActorMessage);
@@ -1526,6 +1577,25 @@ begin
   // * Map the Msg to a (Windows) Message;
   // * dump the tuple into the WParam;
   // * send to a Windows message queue.
+end;
+
+//******************************************************************************
+//* TEventDictionary                                                           *
+//******************************************************************************
+//* TEventDictionary Public methods ********************************************
+
+constructor TEventDictionary.Create;
+begin
+  inherited Create;
+
+  Self.Events := TObjectList.Create;
+end;
+
+destructor TEventDictionary.Destroy;
+begin
+  Self.Events.Free;
+
+  inherited Destroy;
 end;
 
 initialization

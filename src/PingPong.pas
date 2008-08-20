@@ -6,6 +6,8 @@ uses
   Classes, Controls, ExtCtrls, Forms, Ikaria, StdCtrls;
 
 type
+  TFibonacciGenerator = class;
+
   TPingPongDemo = class(TForm)
     Panel1: TPanel;
     StartPing: TButton;
@@ -43,11 +45,20 @@ type
     procedure RegisterActions(Table: TActorMessageTable); override;
   end;
 
-  TFibonacciActor = class(TActor)
+  TFibonacciGenerator = class(TObject)
   private
     CurrentNumber: Integer;
     LastFib:       Integer;
     SecondLastFib: Integer;
+  public
+    constructor Create;
+
+    function Next: Integer;
+  end;
+
+  TFibonacciActor = class(TActor)
+  private
+    FibGen: TFibonacciGenerator;
 
     function  FindNext(Msg: TActorMessage): Boolean;
     procedure ReturnNextFibonacci(Msg: TActorMessage);
@@ -55,6 +66,7 @@ type
     procedure RegisterActions(Table: TActorMessageTable); override;
   public
     constructor Create(Parent: TProcessID); override;
+    destructor  Destroy; override;
   end;
 
 var
@@ -91,15 +103,8 @@ procedure LogToDemo(LogName: String;
 begin
   Lock.Acquire;
   try
-    try
-      if (Severity > LevelDebug) then
-        PingPongDemo.Log.Lines.Add(Description);
-    except
-      on E: Exception do begin
-        PingPongDemo.Log.Lines.Add(Format('+++++ %s: %s +++++', [E.ClassName, E.Message]));
-        raise;
-      end;
-    end;
+//    if (Severity > LevelDebug) then
+      PingPongDemo.Log.Text := PingPongDemo.Log.Text + #13#10 + Description;
   finally
     Lock.Release;
   end;
@@ -151,7 +156,7 @@ begin
 
     Next := RPC(Self.NextFibber, AskForNext, 100000);
     try
-      Self.Log.Lines.Add(IntToStr(TIntegerElement(Next[0]).Value));
+      LogToDemo('', Format('Next Fibonacci: %d', [TIntegerElement(Next[0]).Value]), 0, '', LevelInfo, 0, '');
     finally
       Next.Free;
     end;
@@ -265,6 +270,35 @@ begin
 end;
 
 //******************************************************************************
+//* TFibonacciGenerator                                                        *
+//******************************************************************************
+//* TFibonacciGenerator Public methods *****************************************
+
+constructor TFibonacciGenerator.Create;
+begin
+  inherited Create;
+
+  Self.CurrentNumber := 0;
+  Self.SecondLastFib := 0;
+  Self.LastFib       := 0;  
+end;
+
+function TFibonacciGenerator.Next: Integer;
+begin
+  Self.SecondLastFib := Self.LastFib;
+  Self.LastFib       := Self.CurrentNumber;
+
+  if (Self.SecondLastFib = 0) and (Self.LastFib = 0) then
+    Self.CurrentNumber := 1
+  else if (Self.SecondLastFib = 0) and (Self.LastFib = 1) then
+    Self.CurrentNumber := 1
+  else
+    Self.CurrentNumber := Self.LastFib + Self.SecondLastFib;
+
+  Result := Self.CurrentNumber;
+end;
+
+//******************************************************************************
 //* TFibonacciActor                                                            *
 //******************************************************************************
 //* TFibonacciActor Public methods *********************************************
@@ -273,9 +307,14 @@ constructor TFibonacciActor.Create(Parent: TProcessID);
 begin
   inherited Create(Parent);
 
-  Self.CurrentNumber := 0;
-  Self.SecondLastFib := 0;
-  Self.LastFib       := 0;
+  Self.FibGen := TFibonacciGenerator.Create;
+end;
+
+destructor TFibonacciActor.Destroy;
+begin
+  Self.FibGen.Free;
+
+  inherited Destroy;
 end;
 
 //* TFibonacciActor Protected methods ******************************************
@@ -298,19 +337,9 @@ procedure TFibonacciActor.ReturnNextFibonacci(Msg: TActorMessage);
 var
   Answer: TTuple;
 begin
-  Self.SecondLastFib := Self.LastFib;
-  Self.LastFib       := Self.CurrentNumber;
-
-  if (Self.SecondLastFib = 0) and (Self.LastFib = 0) then
-    Self.CurrentNumber := 1
-  else if (Self.SecondLastFib = 0) and (Self.LastFib = 1) then
-    Self.CurrentNumber := 1
-  else
-    Self.CurrentNumber := Self.LastFib + Self.SecondLastFib;
-
   Answer := TTuple.Create;
   try
-    Answer.AddInteger(Self.CurrentNumber);
+    Answer.AddInteger(Self.FibGen.Next);
     Self.Send(TProcessIDElement(Msg.Data[0]).Value, Answer);
   finally
     Answer.Free;
