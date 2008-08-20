@@ -1349,19 +1349,35 @@ end;
 
 procedure TestActorFunctions.TestRPC;
 var
-  Echo:   TProcessID;
-  Result: TTuple;
+  AnotherTest:  TTuple;
+  Echo:         TProcessID;
+  FirstResult:  TTuple;
+  SecondResult: TTuple;
 begin
-  Echo := Spawn(TEchoActor);
+  AnotherTest := TTuple.Create;
   try
-    Result := RPC(Echo, Self.TestMsg, 1000);
+    AnotherTest.AddProcessID(ConstructUUID);
+
+    Echo := Spawn(TEchoActor);
     try
-      CheckEquals(Self.TestMsg.AsString, Result.AsString, 'RPC didn''t return expected result');
+      FirstResult := RPC(Echo, Self.TestMsg, 1000);
+      try
+        CheckEquals(Self.TestMsg.AsString, FirstResult.AsString, 'RPC didn''t return expected result');
+      finally
+        FirstResult.Free;
+      end;
+
+      SecondResult := RPC(Echo, AnotherTest, 1000);
+      try
+        CheckEquals(AnotherTest.AsString, SecondResult.AsString, '2nd RPC didn''t return expected result');
+      finally
+        FirstResult.Free;
+      end;
     finally
-      Result.Free;
+      Kill(Echo);
     end;
   finally
-    Kill(Echo);
+    AnotherTest.Free;
   end;
 end;
 
