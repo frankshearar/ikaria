@@ -483,6 +483,8 @@ procedure PrimitiveSend(Sender, Target: TProcessID; Msg: TTuple);
       ActorLock.Release;
     end;
   end;
+var
+  AMsg: TActorMessage;  
 begin
   // Send a message Msg from Sender to Target.
   //
