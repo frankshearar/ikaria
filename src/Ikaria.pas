@@ -527,6 +527,7 @@ end;
 procedure UnreserveEvent(E: TEvent);
 begin
   // Do nothing for now.
+  E.ResetEvent;
 end;
 
 //******************************************************************************
