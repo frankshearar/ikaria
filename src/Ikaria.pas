@@ -321,6 +321,9 @@ type
   EActorException = class(Exception);
   ETimeout = class(Exception);
 
+// Return a new PID.
+function ConstructUUID: String;
+
 // Unconditionally kill an Actor. Think hard before using it!
 procedure Kill(Target: TProcessID);
 
