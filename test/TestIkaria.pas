@@ -1629,7 +1629,7 @@ begin
       try
         CheckEquals(AnotherTest[1].AsString, SecondResult[1].AsString, '2nd RPC didn''t return expected result');
       finally
-        FirstResult.Free;
+        SecondResult.Free;
       end;
     finally
       Kill(Echo);
