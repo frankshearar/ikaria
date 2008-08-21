@@ -124,11 +124,23 @@ type
     procedure TestCopy;
     procedure TestEquals;
     procedure TestEqualsOnTree;
+    procedure TestRouteTo;
     procedure TestIsBoolean;
     procedure TestIsInteger;
     procedure TestIsProcessID;
     procedure TestIsString;
     procedure TestIsTuple;
+  end;
+
+  TestTRpcProxyTuple = class(TTestCase)
+  private
+    Src: TTuple;
+    Msg: TTuple;
+  public
+    procedure SetUp; override;
+    procedure TearDown; override;
+  published
+    procedure TestOverlay;
   end;
 
   TestTActorMailbox = class(TTestCase)
@@ -198,6 +210,23 @@ type
   published
     procedure TestActorAcceptsKillMessage;
     procedure TestActorsCanReceiveMessages;
+  end;
+
+  TestTEventDictionary = class(TTestCase)
+  private
+    Dict: TEventDictionary;
+  public
+    procedure SetUp; override;
+    procedure TearDown; override;
+  published
+    procedure TestDataFor;
+    procedure TestDataForUnreservedEvent;
+    procedure TestEventFor;
+    procedure TestEventForUnknownPID;
+    procedure TestPIDFor;
+    procedure TestPIDForUnreservedEvent;
+    procedure TestReserveUnreserveEvent;
+    procedure TestUnreserveUnreservedEvent;
   end;
 
   TestActorFunctions = class(TTestCase)
@@ -294,9 +323,11 @@ begin
   Result.AddSuite(TestTProcessIDElement.Suite);
   Result.AddSuite(TestTStringElement.Suite);
   Result.AddSuite(TestTTuple.Suite);
+  Result.AddSuite(TestTRpcProxyTuple.Suite);
   Result.AddSuite(TestTActorMailbox.Suite);
   Result.AddSuite(TestTActorMessageTable.Suite);
   Result.AddSuite(TestTActor.Suite);
+  Result.AddSuite(TestTEventDictionary.Suite);
   Result.AddSuite(TestActorFunctions.Suite);
 end;
 
@@ -947,6 +978,29 @@ begin
   end;
 end;
 
+procedure TestTTuple.TestRouteTo;
+const
+  OldPID: TProcessID = 'old-pid';
+  NewPID: TProcessID = 'new-pid';
+var
+  H: TTuple;
+  I: Integer;
+begin
+  Self.T.AddProcessID(OldPID);
+  Self.T.AddString('some-msg');
+  Self.T.AddInteger(42);
+
+  H := Self.T.RouteTo(NewPID);
+  try
+    Check(H[0].IsProcessID, 'First element of new msg isn''t a PID');
+    CheckEquals(Self.T.Count, H.Count, 'Not all elements copied');
+    for I := 1 to Self.T.Count - 1 do
+      CheckEquals(Self.T[I].AsString, H[I].AsString, Format('Element %d', [I]));
+  finally
+    H.Free;
+  end;
+end;
+
 procedure TestTTuple.TestIsBoolean;
 begin
   Check(not Self.T.IsBoolean, 'Element marked as a Boolean');
@@ -970,6 +1024,52 @@ end;
 procedure TestTTuple.TestIsTuple;
 begin
   Check(Self.T.IsTuple, 'Element not marked as a Tuple');
+end;
+
+//******************************************************************************
+//* TestTRpcProxyTuple                                                         *
+//******************************************************************************
+//* TestTRpcProxyTuple Public methods ******************************************
+
+procedure TestTRpcProxyTuple.SetUp;
+begin
+  inherited SetUp;
+
+  Self.Msg := TTuple.Create;
+  Self.Msg.AddProcessID('src-id');
+  Self.Msg.AddString('test');
+
+  Self.Src := TTuple.Create;
+  Self.Src.AddProcessID('event-id');
+  Self.Src.AddString(RpcProxyMsg);
+  Self.Src.AddProcessID('target');
+  Self.Src.Add(Self.Msg);
+end;
+
+procedure TestTRpcProxyTuple.TearDown;
+begin
+  Self.Msg.Free;
+  Self.Src.Free;
+
+  inherited TearDown;
+end;
+
+//* TestTRpcProxyTuple Published methods ***************************************
+
+procedure TestTRpcProxyTuple.TestOverlay;
+var
+  O: TRpcProxyTuple;
+begin
+  O := TRpcProxyTuple.Overlay(Self.Src);
+  try
+    CheckEquals(TStringElement(Self.Src[0]).Value, O.EventPID,  'EventID');
+    CheckEquals(RpcProxyMsg, TStringElement(O[1]).Value,        'Message type');
+    CheckEquals(TStringElement(Self.Src[2]).Value, O.TargetPID, 'TargetPID');
+    CheckEquals(Self.Msg.AsString, O.Message.AsString,          'Message');
+
+  finally
+    O.Free;
+  end;
 end;
 
 //******************************************************************************
@@ -1325,6 +1425,163 @@ begin
 end;
 
 //******************************************************************************
+//* TestTEventDictionary                                                       *
+//******************************************************************************
+//* TestTEventDictionary Public methods ****************************************
+
+procedure TestTEventDictionary.SetUp;
+begin
+  inherited SetUp;
+
+  Self.Dict := TEventDictionary.Create;
+end;
+
+procedure TestTEventDictionary.TearDown;
+begin
+  Self.Dict.Free;
+
+  inherited TearDown;
+end;
+
+//* TestTEventDictionary Published methods *************************************
+
+procedure TestTEventDictionary.TestDataFor;
+var
+  Data:   TTuple;
+  E1, E2: TEvent;
+  S:      String;
+begin
+  E1 := Self.Dict.ReserveEvent;
+  try
+    E2 := Self.Dict.ReserveEvent;
+    try
+      Data := TTuple.Create;
+      try
+        Data.AddString('result');
+        S := Data.AsString;
+        Check(nil = Self.Dict.DataFor(E1), 'DataFor before StoreDataFor');
+        Self.Dict.StoreDataFor(E1, Data);
+        Check(nil <> Self.Dict.DataFor(E1), 'StoreDataFor(Event, Tuple) didn''t store data');
+        CheckEquals(Data.AsString, Self.Dict.DataFor(E1).AsString, 'Wrong data stored using Event');
+
+        Check(nil = Self.Dict.DataFor(E2), 'StoreDataFor stored data with wrong event');
+
+        Self.Dict.StoreDataFor(Self.Dict.PIDFor(E2), Data);
+        Check(nil <> Self.Dict.DataFor(E2), 'StoreDataFor(PID, Tuple) didn''t store data');
+        CheckEquals(Data.AsString, Self.Dict.DataFor(E2).AsString, 'Wrong data stored using PID');
+      finally
+        Data.Free;
+      end;
+      CheckEquals(S, Self.Dict.DataFor(E1).AsString, 'StoreDataFor(Event, Tuple) didn''t store a COPY');
+      CheckEquals(S, Self.Dict.DataFor(E2).AsString, 'StoreDataFor(PID, Tuple) didn''t store a COPY');
+    finally
+      Self.Dict.UnreserveEvent(E2);
+    end;
+  finally
+    Self.Dict.UnreserveEvent(E1);
+  end;
+end;
+
+procedure TestTEventDictionary.TestDataForUnreservedEvent;
+var
+  E: TEvent;
+begin
+  Check(nil = Self.Dict.DataFor(nil), 'DataFor(nil)');
+
+  E := TSimpleEvent.Create;
+  try
+    Check(nil = Self.Dict.DataFor(E), 'DataFor(unreserved event)');
+  finally
+    E.Free;
+  end;
+end;
+
+procedure TestTEventDictionary.TestEventFor;
+var
+  E:   TEvent;
+  PID: TProcessID;
+begin
+  E := Self.Dict.ReserveEvent;
+  try
+    PID := Self.Dict.PIDFor(E);
+    Check(E = Self.Dict.EventFor(PID), 'Using PID, Event not found');
+  finally
+    Self.Dict.UnreserveEvent(E);
+  end;
+end;
+
+procedure TestTEventDictionary.TestEventForUnknownPID;
+begin
+  Check(nil = Self.Dict.EventFor(''), 'EventFor(empty string');
+  Check(nil = Self.Dict.EventFor(ConstructUUID), 'EventFor(unknown PID)');
+end;
+
+procedure TestTEventDictionary.TestPIDFor;
+var
+  E1, E2: TEvent;
+begin
+  // This test doesn't _prove_ that the EventDictionary uses unique PIDs for
+  // each event.
+
+  E1 := Self.Dict.ReserveEvent;
+  try
+    E2 := Self.Dict.ReserveEvent;
+    try
+      CheckNotEquals(Self.Dict.PIDFor(E1), Self.Dict.PIDFor(E2), 'PIDFor returned same PID for different events');
+    finally
+      Self.Dict.UnreserveEvent(E2);
+    end;
+  finally
+    Self.Dict.UnreserveEvent(E1);
+  end;
+end;
+
+procedure TestTEventDictionary.TestPIDForUnreservedEvent;
+var
+  E: TEvent;
+begin
+  CheckEquals('', Self.Dict.PIDFor(nil), 'PIDFor(nil)');
+
+  E := TSimpleEvent.Create;
+  try
+    CheckEquals('', Self.Dict.PIDFor(E), 'PIDFor(unreserved event)');
+  finally
+    E.Free;
+  end;
+end;
+
+procedure TestTEventDictionary.TestReserveUnreserveEvent;
+var
+  E: TEvent;
+begin
+  Check(Self.Dict.IsEmpty, 'New EventDictionary');
+
+  E := Self.Dict.ReserveEvent;
+  try
+    Check(Assigned(E), 'ReserveEvent didn''t return an event');
+    Check(not Self.Dict.IsEmpty, 'EventDictionary still empty');
+  finally
+    Self.Dict.UnreserveEvent(E);
+  end;
+  Check(Self.Dict.IsEmpty, 'EventDictionary not emptied');
+end;
+
+procedure TestTEventDictionary.TestUnreserveUnreservedEvent;
+var
+  E: TEvent;
+begin
+  // Unreserving an event that was never reserved does nothing.
+
+  E := TSimpleEvent.Create;
+  try
+    Self.Dict.UnreserveEvent(E);
+    Self.Dict.UnreserveEvent(nil);
+  finally
+    E.Free;
+  end;
+end;
+
+//******************************************************************************
 //* TestActorFunctions                                                         *
 //******************************************************************************
 //* TestActorFunctions Public methods ******************************************
@@ -1363,14 +1620,14 @@ begin
     try
       FirstResult := RPC(Echo, Self.TestMsg, 1000);
       try
-        CheckEquals(Self.TestMsg.AsString, FirstResult.AsString, 'RPC didn''t return expected result');
+        CheckEquals(Self.TestMsg[1].AsString, FirstResult[1].AsString, 'RPC didn''t return expected result');
       finally
         FirstResult.Free;
       end;
 
       SecondResult := RPC(Echo, AnotherTest, 1000);
       try
-        CheckEquals(AnotherTest.AsString, SecondResult.AsString, '2nd RPC didn''t return expected result');
+        CheckEquals(AnotherTest[1].AsString, SecondResult[1].AsString, '2nd RPC didn''t return expected result');
       finally
         FirstResult.Free;
       end;
