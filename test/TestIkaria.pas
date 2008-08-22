@@ -190,20 +190,27 @@ type
     procedure TestAccessors;
   end;
 
-  TestTActor = class(TTestCase)
+  TActorTestCase = class(TTestCase)
   private
     ActorExited: Boolean;
-    E:           TEvent;
     ExitEvent:   TEvent;
     LastSentMsg: TActorMessage;
     MsgEvent:    TEvent;
-    TestMsg:     TTuple;
-
+  protected
     procedure NotifyOfExit(PID: String; Reason: TTuple);
     procedure StoreLastSentMessage(Sender, Target: TProcessID; Msg: TActorMessage);
     procedure WaitFor(E: TEvent; Timeout: Cardinal; Msg: String);
     procedure WaitForExit(Timeout: Cardinal = 1000);
-    procedure WaitForMsg(Timeout: Cardinal = 1000);
+    procedure WaitForMsg(Timeout: Cardinal = 1000; OptionalMsg: String = '');
+  public
+    procedure SetUp; override;
+    procedure TearDown; override;
+  end;
+
+  TestTActor = class(TActorTestCase)
+  private
+    E:           TEvent;
+    TestMsg:     TTuple;
   public
     procedure SetUp; override;
     procedure TearDown; override;
@@ -229,14 +236,18 @@ type
     procedure TestUnreserveUnreservedEvent;
   end;
 
-  TestActorFunctions = class(TTestCase)
+  TestActorFunctions = class(TActorTestCase)
   private
-    TestMsg: TTuple;
+    TestMsg:  TTuple;
+    ThunkRan: Boolean;
+
+    procedure TestThunk;
   public
     procedure SetUp; override;
     procedure TearDown; override;
   published
     procedure TestRPC;
+    procedure TestSpawnThunk;
   end;
 
 const
@@ -264,7 +275,7 @@ type
 var
   Lock:            TCriticalSection;
   Log:             TObjectList;
-  RunningTestCase: TestTActor;
+  RunningTestCase: TActorTestCase;
 
 const
   QuarterSecond = 500;
@@ -1326,6 +1337,74 @@ begin
 end;
 
 //******************************************************************************
+//* TActorTestCase                                                             *
+//******************************************************************************
+//* TActorTestCase Public methods **********************************************
+
+procedure TActorTestCase.SetUp;
+begin
+  inherited SetUp;
+
+  RunningTestCase := Self;
+
+  Self.ExitEvent := TSimpleEvent.Create;
+  Self.MsgEvent  := TSimpleEvent.Create;
+
+  OnActorExitedHook := NotifyOfActorExit;
+  OnMessageSentHook := StoreLastSentMessageInTestCase;
+
+  Self.LastSentMsg  := nil;
+  Self.ActorExited  := false;
+end;
+
+procedure TActorTestCase.TearDown;
+begin
+  RunningTestCase := nil;
+  Self.MsgEvent.Free;
+  Self.LastSentMsg.Free;
+  Self.ExitEvent.Free;
+
+  inherited TearDown;
+end;
+
+//* TActorTestCase Protected methods *******************************************
+
+procedure TActorTestCase.NotifyOfExit(PID: String; Reason: TTuple);
+begin
+  Self.ActorExited := true;
+  Self.ExitEvent.SetEvent;
+end;
+
+procedure TActorTestCase.StoreLastSentMessage(Sender, Target: TProcessID; Msg: TActorMessage);
+begin
+  Self.LastSentMsg.Free;
+  Self.LastSentMsg := Msg.Copy;
+  Self.MsgEvent.SetEvent;
+end;
+
+procedure TActorTestCase.WaitFor(E: TEvent; Timeout: Cardinal; Msg: String);
+begin
+  if (wrSignaled <> E.WaitFor(Timeout)) then
+    Fail(Msg);
+end;
+
+procedure TActorTestCase.WaitForExit(Timeout: Cardinal = 1000);
+begin
+  Self.WaitFor(Self.ExitEvent, Timeout, 'Timed out waiting for an exit notification');
+end;
+
+procedure TActorTestCase.WaitForMsg(Timeout: Cardinal = 1000; OptionalMsg: String = '');
+var
+  Msg: String;
+begin
+  Msg := 'Timed out waiting for a message';
+  if (OptionalMsg <> '') then
+    Msg := Format('%s (%s)', [Msg, OptionalMsg]);
+
+  Self.WaitFor(Self.MsgEvent, Timeout, Msg);
+end;
+
+//******************************************************************************
 //* TestTActor                                                                 *
 //******************************************************************************
 //* TestTActor Public methods **************************************************
@@ -1336,64 +1415,19 @@ begin
 
   PurgeLog;
 
-  RunningTestCase := Self;
-
-  Self.E         := TSimpleEvent.Create;
-  Self.ExitEvent := TSimpleEvent.Create;
-  Self.MsgEvent  := TSimpleEvent.Create;
+  Self.E := TSimpleEvent.Create;
 
   Self.TestMsg := TTuple.Create;
   Self.TestMsg.AddProcessID('');
   Self.TestMsg.AddString(TestName);
-
-  OnActorExitedHook := NotifyOfActorExit;
-  OnMessageSentHook := StoreLastSentMessageInTestCase;
-  Self.ActorExited  := false;
-  Self.LastSentMsg  := nil;
 end;
 
 procedure TestTActor.TearDown;
 begin
-  RunningTestCase := nil;
-
   Self.TestMsg.Free;
-  Self.MsgEvent.Free;
-  Self.LastSentMsg.Free;
-  Self.ExitEvent.Free;
   Self.E.Free;
 
   inherited TearDown;
-end;
-
-//* TestTActor Private methods *************************************************
-
-procedure TestTActor.NotifyOfExit(PID: String; Reason: TTuple);
-begin
-  Self.ActorExited := true;
-  Self.ExitEvent.SetEvent;
-end;
-
-procedure TestTActor.StoreLastSentMessage(Sender, Target: TProcessID; Msg: TActorMessage);
-begin
-  Self.LastSentMsg.Free;
-  Self.LastSentMsg := Msg.Copy;
-  Self.MsgEvent.SetEvent;
-end;
-
-procedure TestTActor.WaitFor(E: TEvent; Timeout: Cardinal; Msg: String);
-begin
-  if (wrSignaled <> E.WaitFor(Timeout)) then
-    Fail(Msg);
-end;
-
-procedure TestTActor.WaitForExit(Timeout: Cardinal = 1000);
-begin
-  Self.WaitFor(Self.ExitEvent, 1000, 'Timed out waiting for an exit notification');
-end;
-
-procedure TestTActor.WaitForMsg(Timeout: Cardinal = 1000);
-begin
-  Self.WaitFor(Self.MsgEvent, 1000, 'Timed out waiting for a message');
 end;
 
 //* TestTActor Published methods ***********************************************
@@ -1593,6 +1627,8 @@ begin
   Self.TestMsg := TTuple.Create;
   Self.TestMsg.AddProcessID(TActor.RootActor);
   Self.TestMsg.AddString(TestName);
+
+  Self.ThunkRan := false;
 end;
 
 procedure TestActorFunctions.TearDown;
@@ -1600,6 +1636,13 @@ begin
   Self.TestMsg.Free;
 
   inherited TearDown;
+end;
+
+//* TestActorFunctions Private methods ***************************************((
+
+procedure TestActorFunctions.TestThunk;
+begin
+  Self.ThunkRan := true;
 end;
 
 //* TestActorFunctions Published methods ***************************************
@@ -1637,6 +1680,13 @@ begin
   finally
     AnotherTest.Free;
   end;
+end;
+
+procedure TestActorFunctions.TestSpawnThunk;
+begin
+  Spawn(TestThunk);
+  Self.WaitForExit(1000);
+  Check(Self.ThunkRan, 'Thunk didn''t run');
 end;
 
 initialization;

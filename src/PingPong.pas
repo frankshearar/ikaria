@@ -103,7 +103,7 @@ procedure LogToDemo(LogName: String;
 begin
   Lock.Acquire;
   try
-//    if (Severity > LevelDebug) then
+    if (Severity > LevelDebug) then
       PingPongDemo.Log.Text := PingPongDemo.Log.Text + #13#10 + Description;
   finally
     Lock.Release;

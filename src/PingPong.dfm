@@ -61,6 +61,7 @@ object PingPongDemo: TPingPongDemo
     Font.Name = 'Courier New'
     Font.Style = []
     ParentFont = False
+    ScrollBars = ssVertical
     TabOrder = 1
   end
 end

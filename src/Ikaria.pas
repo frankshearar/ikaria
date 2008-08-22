@@ -257,6 +257,15 @@ type
     property PID: TProcessID read fPID;
   end;
 
+  TThunkActor = class(TActor)
+  private
+    fThunk: TThunk;
+  protected
+    procedure Run; override;
+  public
+    property Thunk: TThunk read fThunk write fThunk;
+  end;
+
   TEventMapping = class(TObject)
   private
     fEvent:  TEvent;
@@ -342,10 +351,8 @@ procedure SendActorMessage(Target: TProcessID; Msg: TTuple);
 
 // Spawn a new Actor of the given type as a child of the Root Actor, returning
 // its PID.
-function Spawn(ActorType: TActorClass): TProcessID;
-
-// Wait for a particular Actor to send you a message matching some Condition.
-function WaitForMessageFrom(Target: TProcessID; Condition: TMessageFinder): TActorMessage;
+function Spawn(ActorType: TActorClass): TProcessID; overload;
+function Spawn(T: TThunk): TProcessID; overload;
 
 const
   ActorCreatedMsg = 'Actor %s created (of type %s)';
@@ -627,8 +634,15 @@ begin
   A.Resume;
 end;
 
-function WaitForMessageFrom(Target: TProcessID; Condition: TMessageFinder): TActorMessage;
+function Spawn(T: TThunk): TProcessID;
+var
+  Thunker: TThunkActor;
 begin
+  Thunker := TThunkActor.Create(TActor.RootActor);
+  Thunker.Thunk := T;
+
+  Result := Thunker.PID;
+  Thunker.Resume;
 end;
 
 //******************************************************************************
@@ -1506,6 +1520,16 @@ procedure TActor.WaitForMessage(MillisecondTimeout: Cardinal);
 begin
   Self.MsgEvent.WaitFor(MillisecondTimeout);
   Self.MsgEvent.ResetEvent;
+end;
+
+//******************************************************************************
+//* TThunkActor                                                                *
+//******************************************************************************
+//* TThunkActor Protected methods **********************************************
+
+procedure TThunkActor.Run;
+begin
+  Self.Thunk;
 end;
 
 //******************************************************************************
