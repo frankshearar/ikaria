@@ -390,11 +390,6 @@ var
   RpcEvents: TEventDictionary;
   ActorLock: TCriticalSection; // Used to lock access to Actors.
   UsedPIDs:  TStringList;
-  TempData:  TTuple;
-  TempEvent: TEvent;
-
-const
-  TempEventPID = '86657b58-6e06-4b02-8469-b7d6f1ee652f';
 
 // Tag generation
 var
@@ -416,11 +411,6 @@ var
 begin
   CreateGUID(NewGuid);
   Result := Lowercase(WithoutFirstAndLastChars(GUIDToString(NewGuid)));
-end;
-
-function DataFor(E: TEvent): TTuple;
-begin
-  Result := TempData;
 end;
 
 function NextPID: TProcessID;
@@ -465,11 +455,6 @@ begin
   finally
     TagLock.Release;
   end;
-end;
-
-function PIDFor(E: Tevent): TProcessID;
-begin
-  Result := TempEventPID;
 end;
 
 function PrimitiveRegisterActor(A: TActor): TProcessID;
@@ -531,17 +516,6 @@ begin
   finally
     ActorLock.Release;
   end;
-end;
-
-function ReserveEvent: TEvent;
-begin
-  Result := TempEvent;
-end;
-
-procedure UnreserveEvent(E: TEvent);
-begin
-  // Do nothing for now.
-  E.ResetEvent;
 end;
 
 //******************************************************************************
@@ -1795,8 +1769,6 @@ initialization
   Actors    := TStringList.Create;
   RpcEvents := TEventDictionary.Create;
   UsedPIDs  := TStringList.Create;
-
-  TempEvent := TSimpleEvent.Create;
 
   // Tag generation
   NextAvailableTag := 0;
