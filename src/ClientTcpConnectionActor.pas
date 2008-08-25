@@ -3,7 +3,7 @@ unit ClientTcpConnectionActor;
 interface
 
 uses
-  Classes, Contnrs, Ikaria, Messages, SyncObjs;
+  Classes, Contnrs, IdTcpClient, Ikaria, Messages, SyncObjs;
 
 type
   // In Erlang: {"127.0.0.1", 8080, "TCP"}
@@ -21,11 +21,12 @@ type
     property Transport: String  read GetTransport;
   end;
 
-  TConnectMsg = class(TTuple)
+  // ("connect" {reply-to} ("127.0.0.1" 8000 "TCP"))
+  TConnectMsg = class(TMessageTuple)
   private
     function GetLocation: TLocationTuple;
   public
-    constructor Create(Location: TLocationTuple);
+    constructor Create(ReplyTo: TProcessID; Location: TLocationTuple);
 
     property Location: TLocationTuple read GetLocation;
   end;
@@ -37,22 +38,27 @@ type
   // * Exit
   // * ReceivedData(String)
   // and receives the following messages:
-  // * CloseConnection
+  // * ("close" {src-pid})
   // * ("connect" {src-pid} ("address" port "transport))
   // * SendData(String)
   TClientTcpConnectionActor = class(TActor)
   private
-//    Connection: TIdTcpClient;
+    Connection: TIdTcpClient;
 
-//    function  FindOpenConnection(Msg: TActorMessage): Boolean;
-//    procedure ReactToOpenConnection(Msg: TActorMessage);
+    procedure Close(Msg: TActorMessage);
+    procedure Connect(Msg: TActorMessage);
+    function  FindClose(Msg: TActorMessage): Boolean;
+    function  FindConnect(Msg: TActorMessage): Boolean;
+  protected
+    procedure RegisterActions(Table: TActorMessageTable); override;
   public
     constructor Create(Parent: TProcessID); override;
     destructor  Destroy; override;
   end;
 
 const
-  ConnectMsg = 'connect';
+  CloseConnectionMsg = 'close';
+  ConnectMsg         = 'connect';
 
 implementation
 
@@ -92,38 +98,80 @@ end;
 //******************************************************************************
 //* TConnectMsg Public methods *************************************************
 
-constructor TConnectMsg.Create(Location: TLocationTuple);
+constructor TConnectMsg.Create(ReplyTo: TProcessID; Location: TLocationTuple);
 begin
-  inherited Create;
-
-  Self.AddString(ConnectMsg);
-  Self.Add(Location);
+  inherited Create(ConnectMsg, ReplyTo, Location);
 end;
 
 //* TConnectMsg Private methods ************************************************
 
 function TConnectMsg.GetLocation: TLocationTuple;
 begin
-  Result := Self[1] as TLocationTuple;
+  Result := Self.Parameters as TLocationTuple;
 end;
 
 //******************************************************************************
 //* TClientTcpConnectionActor                                                  *
 //******************************************************************************
-//* TClientTcpConnectionActor  Public methods **********************************
+//* TClientTcpConnectionActor Public methods ***********************************
 
 constructor TClientTcpConnectionActor.Create(Parent: TProcessID);
 begin
   inherited Create(Parent);
 
-//  Self.Connection := TIdTcpClient.Create;
+  Self.Connection := TIdTcpClient.Create(nil);
 end;
 
 destructor TClientTcpConnectionActor.Destroy;
 begin
-//  Self.Connection.Free;
+  Self.Connection.Free;
 
   inherited Destroy;
+end;
+
+//* TClientTcpConnectionActor Protected methods ********************************
+
+procedure TClientTcpConnectionActor.RegisterActions(Table: TActorMessageTable);
+begin
+  inherited RegisterActions(Table);
+
+  Table.Add(Self.FindConnect, Self.Connect);
+  Table.Add(Self.FindClose, Self.Close);
+end;
+
+//* TClientTcpConnectionActor Private methods **********************************
+
+procedure TClientTcpConnectionActor.Close(Msg: TActorMessage);
+begin
+  Self.Connection.Disconnect;
+end;
+
+procedure TClientTcpConnectionActor.Connect(Msg: TActorMessage);
+var
+  Conn: TConnectMsg;
+begin
+  if Self.Connection.Connected then Exit;
+
+  Conn := TConnectMsg.Overlay(Msg.Data);
+  try
+    Self.Connection.Host := Conn.Location.Address;
+    Self.Connection.Port := Conn.Location.Port;
+    Self.Connection.Connect;
+  finally
+    Conn.Free;
+  end;
+end;
+
+function TClientTcpConnectionActor.FindClose(Msg: TActorMessage): Boolean;
+begin
+  Result := (Msg.Data.Count > 0)
+         and ((Msg.Data[0] as TStringElement).Value = CloseConnectionMsg);
+end;
+
+function TClientTcpConnectionActor.FindConnect(Msg: TActorMessage): Boolean;
+begin
+  Result := (Msg.Data.Count > 0)
+         and ((Msg.Data[0] as TStringElement).Value = ConnectMsg);
 end;
 
 end.
