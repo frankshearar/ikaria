@@ -112,6 +112,8 @@ type
     property Elements[Index: Integer]: TTupleElement read GetElement; default;
   end;
 
+  TTupleClass = class of TTuple;
+
   // The base class of all standard messages in Ikaria, MessageTuples look like
   // this:
   //   ("msg-name" {reply-to-pid} (some tuple of paramters))
@@ -121,7 +123,8 @@ type
     function GetParameters: TTuple;
     function GetReplyTo: TProcessID;
   public
-    constructor Create(MessageName: String; ReplyTo: TProcessID; Parameters: TTuple);
+    constructor Create(MessageName: String; ReplyTo: TProcessID); overload;
+    constructor Create(MessageName: String; ReplyTo: TProcessID; Parameters: TTuple); overload;
     constructor Overlay(Msg: TTuple);
 
     property MessageName: String     read GetMessageName;
@@ -876,7 +879,7 @@ var
   I: Integer;
   NewT: TTuple;
 begin
-  NewT := TTuple.Create;
+  NewT := TTupleClass(Self.ClassType).Create;
 
   for I := 0 to Self.Count - 1 do
     NewT.Add(Self[I]);
@@ -939,6 +942,18 @@ end;
 //* TMessageTuple                                                              *
 //******************************************************************************
 //* TMessageTuple Public methods ***********************************************
+
+constructor TMessageTuple.Create(MessageName: String; ReplyTo: TProcessID);
+var
+  NoParams: TTuple;
+begin
+  NoParams := TTuple.Create;
+  try
+    Create(MessageName, ReplyTo, NoParams);
+  finally
+    NoParams.Free;
+  end;
+end;
 
 constructor TMessageTuple.Create(MessageName: String; ReplyTo: TProcessID; Parameters: TTuple);
 begin
