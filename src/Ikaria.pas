@@ -112,18 +112,33 @@ type
     property Elements[Index: Integer]: TTupleElement read GetElement; default;
   end;
 
-  TRpcProxyTuple = class(TTuple)
+  // The base class of all standard messages in Ikaria, MessageTuples look like
+  // this:
+  //   ("msg-name" {reply-to-pid} (some tuple of paramters))
+  TMessageTuple = class(TTuple)
   private
-    function GetEventPID: String;
-    function GetMessage: TTuple;
-    function GetTargetPID: String;
+    function GetMessageName: String;
+    function GetParameters: TTuple;
+    function GetReplyTo: TProcessID;
   public
-    constructor Create(EventPID, TargetPID: TProcessID; Message: TTuple);
+    constructor Create(MessageName: String; ReplyTo: TProcessID; Parameters: TTuple);
     constructor Overlay(Msg: TTuple);
 
-    property EventPID:  String read GetEventPID;
-    property Message:   TTuple read GetMessage;
-    property TargetPID: String read GetTargetPID;
+    property MessageName: String     read GetMessageName;
+    property Parameters:  TTuple     read GetParameters;
+    property ReplyTo:     TProcessID read GetReplyTo;
+  end;
+
+  //("rpc-proxy" {event-id} {target-id} ("proxied-msg" param1 param2))
+  TRpcProxyTuple = class(TMessageTuple)
+  private
+    function GetMessage: TTuple;
+    function GetTargetPID: TProcessID;
+  public
+    constructor Create(EventPID, TargetPID: TProcessID; Message: TTuple);
+
+    property Message:   TTuple     read GetMessage;
+    property TargetPID: TProcessID read GetTargetPID;
   end;
 
   // I represent a message sent to an Actor.
@@ -286,6 +301,7 @@ type
   TEventDictionary = class(TObject)
   private
     Events: TObjectList;
+    Lock:   TCriticalSection;
 
     function  IndexOf(E: TEvent): Integer; overload;
     function  IndexOf(PID: TProcessID): Integer; overload;
@@ -568,7 +584,7 @@ begin
     end;
 
     while (Now < EndTime) do begin
-      Wait := E.WaitFor(1000);
+      Wait := E.WaitFor(Timeout);
 
       case Wait of
         wrSignaled: begin
@@ -920,29 +936,28 @@ begin
 end;
 
 //******************************************************************************
-//* TRpcProxyTuple                                                             *
+//* TMessageTuple                                                              *
 //******************************************************************************
-//* TRpcProxyTuple Public methods **********************************************
+//* TMessageTuple Public methods ***********************************************
 
-constructor TRpcProxyTuple.Create(EventPID, TargetPID: TProcessID; Message: TTuple);
+constructor TMessageTuple.Create(MessageName: String; ReplyTo: TProcessID; Parameters: TTuple);
 begin
   inherited Create;
 
-  Self.AddProcessID(EventPID);
-  Self.AddString(RpcProxyMsg);
-  Self.AddProcessID(TargetPID);
-  Self.Add(Message);
+  Self.AddString(MessageName);
+  Self.AddProcessID(ReplyTo);
+  Self.Add(Parameters);
 end;
 
-constructor TRpcProxyTuple.Overlay(Msg: TTuple);
+constructor TMessageTuple.Overlay(Msg: TTuple);
 var
   I: Integer;
 begin
   // Ikaria's infrastructure doesn't know (or care) about how a tuple's laid
   // out. We do, however. Thus, sometimes one wants to turn a generic TTuple
-  // into a TRpcProxyTuple to avoid hard-coding indices all over the place.
+  // into a TMessageTuple to avoid hard-coding indices all over the place.
   //
-  // Be warned: if Msg is not the same "shape" as a TRPcProxyTuple, you will
+  // Be warned: if Msg is not the same "shape" as a TMessageTuple, you will
   // suffer agonies like EInvalidCast when calling the getters!
 
   inherited Create;
@@ -951,21 +966,53 @@ begin
     Self.Add(Msg[I]);
 end;
 
-//* TRpcProxyTuple Private methods *********************************************
+//* TMessageTuple Private methods **********************************************
 
-function TRpcProxyTuple.GetEventPID: String;
+function TMessageTuple.GetReplyTo: TProcessID;
 begin
-  Result := TStringElement(Self[0]).Value;
+  Result := (Self[1] as TProcessIDElement).Value;
 end;
+
+function TMessageTuple.GetMessageName: String;
+begin
+  Result := (Self[0] as TStringElement).Value;
+end;
+
+function TMessageTuple.GetParameters: TTuple;
+begin
+  Result := Self[2] as TTuple;
+end;
+
+//******************************************************************************
+//* TRpcProxyTuple                                                             *
+//******************************************************************************
+//* TRpcProxyTuple Public methods **********************************************
+
+constructor TRpcProxyTuple.Create(EventPID, TargetPID: TProcessID; Message: TTuple);
+var
+  Params: TTuple;
+begin
+  Params := TTuple.Create;
+  try
+    Params.AddProcessID(TargetPID);
+    Params.Add(Message);
+
+    inherited Create(RpcProxyMsg, EventPID, Params);
+  finally
+    Params.Free;
+  end;
+end;
+
+//* TRpcProxyTuple Private methods *********************************************
 
 function TRpcProxyTuple.GetMessage: TTuple;
 begin
-  Result := TTuple(Self[3]);
+  Result := Self.Parameters[1] as TTuple;
 end;
 
-function TRpcProxyTuple.GetTargetPID: String;
+function TRpcProxyTuple.GetTargetPID: TProcessID;
 begin
-  Result := TStringElement(Self[2]).Value;
+  Result := (Self.Parameters[0] as TProcessIDElement).Value;
 end;
 
 //******************************************************************************
@@ -1545,13 +1592,10 @@ end;
 
 function TProxyActor.FindProxy(Msg: TActorMessage): Boolean;
 begin
-  // (<ID> "proxy-msg" <Target_PID> <actual_msg>)
-  Result := (Msg.Data.Count > 3)
-        and Msg.Data[0].IsProcessID
-        and Msg.Data[1].IsString
-        and (TStringElement(Msg.Data[1]).Value = RpcProxyMsg)
-        and Msg.Data[2].IsProcessID
-        and Msg.Data[3].IsTuple;
+  // ("proxy-msg" <ID> (<Target_PID> <actual_msg>))
+  Result := (Msg.Data.Count > 1)
+        and Msg.Data[0].IsString
+        and (TStringElement(Msg.Data[0]).Value = RpcProxyMsg);
 end;
 
 function TProxyActor.FindResponse(Msg: TActorMessage): Boolean;
@@ -1566,7 +1610,12 @@ var
 begin
   Proxy := TRpcProxyTuple.Overlay(Msg.Data);
   try
-    Self.EventPID := Proxy.EventPID;
+//    try
+      Self.EventPID := Proxy.ReplyTo;
+//    except
+//      on E: EListError do
+//        Self.EventPID := '';
+//    end;
 
     ReroutedMsg := Proxy.Message.RouteTo(Self.PID);
     try
@@ -1636,10 +1685,12 @@ begin
   inherited Create;
 
   Self.Events := TObjectList.Create;
+  Self.Lock   := TCriticalSection.Create;
 end;
 
 destructor TEventDictionary.Destroy;
 begin
+  Self.Lock.Free;
   Self.Events.Free;
 
   inherited Destroy;
@@ -1652,12 +1703,17 @@ begin
   // Return the result associated with E. If E isn't a reserved event, or there
   // is no result (yet) associated with E, return nil.
 
-  Index := Self.IndexOf(E);
+  Self.Lock.Acquire;
+  try
+    Index := Self.IndexOf(E);
 
-  if (Index <> -1) then
-    Result := Self.MappingAt(Index).Result
-  else
-    Result := nil;
+    if (Index <> -1) then
+      Result := Self.MappingAt(Index).Result
+    else
+      Result := nil;
+  finally
+    Self.Lock.Release;
+  end;
 end;
 
 function TEventDictionary.EventFor(PID: TProcessID): TEvent;
@@ -1666,69 +1722,104 @@ var
 begin
   // Return the Event associated with PID, or nil.
 
-  Index := Self.IndexOf(PID);
+  Self.Lock.Acquire;
+  try
+    Index := Self.IndexOf(PID);
 
-  if (Index <> -1) then
-    Result := Self.MappingAt(Index).Event
-  else
-    Result := nil;
+    if (Index <> -1) then
+      Result := Self.MappingAt(Index).Event
+    else
+      Result := nil;
+  finally
+    Self.Lock.Release;
+  end;
 end;
 
 function TEventDictionary.IsEmpty: Boolean;
 begin
-  Result := Self.Events.Count = 0;
+  Self.Lock.Acquire;
+  try
+    Result := Self.Events.Count = 0;
+  finally
+    Self.Lock.Release;
+  end;
 end;
 
 function TEventDictionary.PIDFor(E: TEvent): TProcessID;
 var
   Index: Integer;
 begin
-  Index := Self.IndexOf(E);
+  Self.Lock.Acquire;
+  try
+    Index := Self.IndexOf(E);
 
-  if (Index <> -1) then
-    Result := Self.MappingAt(Index).PID
-  else
-    Result := '';
+    if (Index <> -1) then
+      Result := Self.MappingAt(Index).PID
+    else
+      Result := '';
+  finally
+    Self.Lock.Release;
+  end;
 end;
 
 function TEventDictionary.ReserveEvent: TEvent;
 var
   Map: TEventMapping;
 begin
-  Map := TEventMapping.Create;
-  Self.Events.Add(Map);
+  Self.Lock.Acquire;
+  try
+    Map := TEventMapping.Create;
+    Self.Events.Add(Map);
 
-  Result := Map.Event;
+    Result := Map.Event;
+  finally
+    Self.Lock.Release;
+  end;
 end;
 
 procedure TEventDictionary.StoreDataFor(E: TEvent; Data: TTuple);
 var
   Index: Integer;
 begin
-  Index := Self.IndexOf(E);
+  Self.Lock.Acquire;
+  try
+    Index := Self.IndexOf(E);
 
-  if (Index <> -1) then
-    Self.MappingAt(Index).SetResult(Data);
+    if (Index <> -1) then
+      Self.MappingAt(Index).SetResult(Data);
+  finally
+    Self.Lock.Release;
+  end;
 end;
 
 procedure TEventDictionary.StoreDataFor(PID: TProcessID; Data: TTuple);
 var
   Index: Integer;
 begin
-  Index := Self.IndexOf(PID);
+  Self.Lock.Acquire;
+  try
+    Index := Self.IndexOf(PID);
 
-  if (Index <> -1) then
-    Self.MappingAt(Index).SetResult(Data);
+    if (Index <> -1) then
+      Self.MappingAt(Index).SetResult(Data);
+  finally
+    Self.Lock.Release;
+  end;
 end;
 
 procedure TEventDictionary.UnreserveEvent(E: TEvent);
 var
   Index: Integer;
 begin
-  Index := Self.IndexOf(E);
+  Self.Lock.Acquire;
+  try
+    Index := Self.IndexOf(E);
 
-  if (Index <> -1) then
-    Self.Events.Delete(Index);
+    if (Index <> -1) then
+      Self.Events.Delete(Index);
+  finally
+    Self.Lock.Release;
+  end;
 end;
 
 //* TEventDictionary Private methods *******************************************

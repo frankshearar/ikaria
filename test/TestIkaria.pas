@@ -134,7 +134,7 @@ type
 
   TestTRpcProxyTuple = class(TTestCase)
   private
-    Src: TTuple;
+    Src: TMessageTuple;
     Msg: TTuple;
   public
     procedure SetUp; override;
@@ -1054,6 +1054,8 @@ end;
 //* TestTRpcProxyTuple Public methods ******************************************
 
 procedure TestTRpcProxyTuple.SetUp;
+var
+  Params: TTuple;
 begin
   inherited SetUp;
 
@@ -1061,11 +1063,15 @@ begin
   Self.Msg.AddProcessID('src-id');
   Self.Msg.AddString('test');
 
-  Self.Src := TTuple.Create;
-  Self.Src.AddProcessID('event-id');
-  Self.Src.AddString(RpcProxyMsg);
-  Self.Src.AddProcessID('target');
-  Self.Src.Add(Self.Msg);
+  Params := TTuple.Create;
+  try
+    Params.AddProcessID('target');
+    Params.Add(Self.Msg);
+
+      Self.Src := TMessageTuple.Create(RpcProxyMsg, 'event-id', Params);
+  finally
+    Params.Free;
+  end;
 end;
 
 procedure TestTRpcProxyTuple.TearDown;
@@ -1081,14 +1087,16 @@ end;
 procedure TestTRpcProxyTuple.TestOverlay;
 var
   O: TRpcProxyTuple;
+  Params: TTuple;
 begin
+  Params := Self.Src[2] as TTuple;
+
   O := TRpcProxyTuple.Overlay(Self.Src);
   try
-    CheckEquals(TStringElement(Self.Src[0]).Value, O.EventPID,  'EventID');
-    CheckEquals(RpcProxyMsg, TStringElement(O[1]).Value,        'Message type');
-    CheckEquals(TStringElement(Self.Src[2]).Value, O.TargetPID, 'TargetPID');
-    CheckEquals(Self.Msg.AsString, O.Message.AsString,          'Message');
-
+    CheckEquals(RpcProxyMsg, O.MessageName, 'Message type');
+    CheckEquals(Self.Src.ReplyTo, O.ReplyTo, 'ReplyTo');
+    CheckEquals((Params[0] as TProcessIDElement).Value, O.TargetPID, 'TargetPID');
+    CheckEquals(Params[1].AsString, O.Message.AsString, 'Message');
   finally
     O.Free;
   end;
@@ -1657,8 +1665,8 @@ begin
   inherited SetUp;
 
   Self.TestMsg := TTuple.Create;
-  Self.TestMsg.AddProcessID(TActor.RootActor);
   Self.TestMsg.AddString(TestName);
+  Self.TestMsg.AddProcessID(TActor.RootActor);
 
   Self.ThunkRan := false;
 end;
