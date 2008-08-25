@@ -276,6 +276,7 @@ var
   Lock:            TCriticalSection;
   Log:             TObjectList;
   RunningTestCase: TActorTestCase;
+  TestLock:        TCriticalSection;
 
 const
   QuarterSecond = 500;
@@ -315,15 +316,25 @@ procedure NotifyOfActorExit(PID: String; ExitReason: TTuple);
 begin
   LogEntry('', Format(ActorExitedMsg, [PID, ExitReason.AsString]), 0, 'Ikaria', 0, 0, '');
 
-  if Assigned(RunningTestCase) then
-    RunningTestCase.NotifyOfExit(PID, ExitReason);
+  TestLock.Acquire;
+  try
+    if Assigned(RunningTestCase) then
+      RunningTestCase.NotifyOfExit(PID, ExitReason);
+  finally
+    TestLock.Release;
+  end;
 end;
 
 procedure StoreLastSentMessageInTestCase(Sender, Target: TProcessID; Msg: TActorMessage);
 begin
-  LogEntry('', Format(MessageSentMsg, [Sender, Target, Msg.AsString]), 0, 'Ikaria', 0, 0, '');
-  if Assigned(RunningTestCase) then
-    RunningTestCase.StoreLastSentMessage(Sender, Target, Msg);
+  TestLock.Acquire;
+  try
+    LogEntry('', Format(MessageSentMsg, [Sender, Target, Msg.AsString]), 0, 'Ikaria', 0, 0, '');
+    if Assigned(RunningTestCase) then
+      RunningTestCase.StoreLastSentMessage(Sender, Target, Msg);
+  finally
+    TestLock.Release;
+  end;
 end;
 
 function Suite: ITestSuite;
@@ -1345,23 +1356,35 @@ procedure TActorTestCase.SetUp;
 begin
   inherited SetUp;
 
-  RunningTestCase := Self;
-
   Self.ExitEvent := TSimpleEvent.Create;
   Self.MsgEvent  := TSimpleEvent.Create;
 
   OnActorExitedHook := NotifyOfActorExit;
   OnMessageSentHook := StoreLastSentMessageInTestCase;
 
-  Self.LastSentMsg  := nil;
+
+  TestLock.Acquire;
+  try
+    RunningTestCase := Self;
+    Self.LastSentMsg  := nil;
+  finally
+    TestLock.Release;
+  end;
+
   Self.ActorExited  := false;
 end;
 
 procedure TActorTestCase.TearDown;
 begin
-  RunningTestCase := nil;
+  TestLock.Acquire;
+  try
+    RunningTestCase := nil;
+    Self.LastSentMsg.Free;
+  finally
+    TestLock.Release;
+  end;
+
   Self.MsgEvent.Free;
-  Self.LastSentMsg.Free;
   Self.ExitEvent.Free;
 
   inherited TearDown;
@@ -1377,6 +1400,9 @@ end;
 
 procedure TActorTestCase.StoreLastSentMessage(Sender, Target: TProcessID; Msg: TActorMessage);
 begin
+  // StoreLastSentMessageInTestCase locks access to this method; nothing else
+  // calls it.
+
   Self.LastSentMsg.Free;
   Self.LastSentMsg := Msg.Copy;
   Self.MsgEvent.SetEvent;
@@ -1451,8 +1477,14 @@ begin
   try
     SendActorMessage(PID, Self.TestMsg);
     Self.WaitForMsg(1000);
-    CheckEquals(TestMsg.AsString, Self.LastSentMsg.Data.AsString,
-                'Echo process didn''t send a message, hence didn''t receive one');
+
+    TestLock.Acquire;
+    try
+      CheckEquals(TestMsg.AsString, Self.LastSentMsg.Data.AsString,
+                  'Echo process didn''t send a message, hence didn''t receive one');
+    finally
+      TestLock.Release;
+    end;
   finally
     Kill(PID);
   end;
@@ -1690,8 +1722,9 @@ begin
 end;
 
 initialization;
-  Lock := TCriticalSection.Create;
-  Log  := TObjectList.Create(true);
+  Lock     := TCriticalSection.Create;
+  Log      := TObjectList.Create(true);
+  TestLock := TCriticalSection.Create;
 
   RegisterTest('Ikaria', Suite);
 end.
