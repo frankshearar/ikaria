@@ -5,8 +5,9 @@ uses
   GuiTestRunner,
   ClientTcpConnectionActor in 'src\ClientTcpConnectionActor.pas',
   Ikaria in 'src\Ikaria.pas',
+  PingPong in 'src\PingPong.pas' {PingPongDemo},
   TestIkaria in 'test\TestIkaria.pas',
-  PingPong in 'src\PingPong.pas' {PingPongDemo};
+  TestClientTcpConnectionActor in 'test\TestClientTcpConnectionActor.pas';
 
 {$R *.res}
 

@@ -21,6 +21,15 @@ type
     property Transport: String  read GetTransport;
   end;
 
+  TConnectMsg = class(TTuple)
+  private
+    function GetLocation: TLocationTuple;
+  public
+    constructor Create(Location: TLocationTuple);
+
+    property Location: TLocationTuple read GetLocation;
+  end;
+
   // An Actor that sends the following messages:
   // * ConnectionClosed
   // * ConnectionOpened
@@ -29,7 +38,7 @@ type
   // * ReceivedData(String)
   // and receives the following messages:
   // * CloseConnection
-  // * OpenConnection(Address, PortNumber)
+  // * ("connect" {src-pid} ("address" port "transport))
   // * SendData(String)
   TClientTcpConnectionActor = class(TActor)
   private
@@ -42,6 +51,8 @@ type
     destructor  Destroy; override;
   end;
 
+const
+  ConnectMsg = 'connect';
 
 implementation
 
@@ -76,6 +87,25 @@ begin
   Result := TStringElement(Self[2]).Value;
 end;
 
+//******************************************************************************
+//* TConnectMsg                                                                *
+//******************************************************************************
+//* TConnectMsg Public methods *************************************************
+
+constructor TConnectMsg.Create(Location: TLocationTuple);
+begin
+  inherited Create;
+
+  Self.AddString(ConnectMsg);
+  Self.Add(Location);
+end;
+
+//* TConnectMsg Private methods ************************************************
+
+function TConnectMsg.GetLocation: TLocationTuple;
+begin
+  Result := Self[1] as TLocationTuple;
+end;
 
 //******************************************************************************
 //* TClientTcpConnectionActor                                                  *
