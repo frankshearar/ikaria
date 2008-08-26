@@ -2,7 +2,6 @@ unit Ikaria;
 
 
 // TODO:
-// * function Spawn(Lambda: TThunk): TProcessID;
 // * function TActor.SpawnLink(Actor: TActor): TProcessID;
 // * Propogating exits to the link set of an Actor
 // * Trapping of exits (when a flag is set)
@@ -88,11 +87,14 @@ type
     property Value: String read fValue;
   end;
 
+  TTupleClass = class of TTuple;
+
   TTuple = class(TTupleElement)
   private
     TupleElements: TObjectList;
 
     function GetElement(Index: Integer): TTupleElement;
+    function ThisClassType: TTupleClass;
   public
     constructor Create;
     destructor  Destroy; override;
@@ -111,8 +113,6 @@ type
 
     property Elements[Index: Integer]: TTupleElement read GetElement; default;
   end;
-
-  TTupleClass = class of TTuple;
 
   // The base class of all standard messages in Ikaria, MessageTuples look like
   // this:
@@ -173,6 +173,7 @@ type
   TActorMailbox = class(TObject)
   private
     fOnMessageArrived: TNotifyEvent;
+    fPID:              TProcessID;
     Lock:              TCriticalSection;
     Messages:          TObjectList;
     SaveQueue:         TObjectList;
@@ -197,6 +198,7 @@ type
     procedure Timeout;
 
     property OnMessageArrived: TNotifyEvent read fOnMessageArrived write SetOnMessageArrived;
+    property PID:              TProcessID   read fPID;
   end;
 
   TActorMessageActionPair = class(TObject)
@@ -231,25 +233,21 @@ type
   // "thunks" after the LISP community's term.
   TThunk = procedure of object;
 
-  // I represent an execution context. I send and receive messages to and from
-  // other Actors.
-  TActor = class(TThread)
+  // I provide a way for non-Actors to both send messages to and receive
+  // messages from Actors.
+  TActorInterface = class(TObject)
   private
-    fPID:     TProcessID;
-    Mailbox:  TActorMailbox;
-    MsgEvent: TEvent;
+    fTerminated: Boolean;
+    Mailbox:     TActorMailbox;
+    MsgEvent:    TEvent;
 
+    function  GetPID: TProcessID;
     procedure NewMessageArrived(Sender: TObject);
-    procedure NullMethod;
-    procedure ReactToKill(Msg: TActorMessage);
-    procedure RegisterRequiredActions(Table: TActorMessageTable);
-    procedure WaitForMessage(MillisecondTimeout: Cardinal);
-  protected
-    MsgTable: TActorMessageTable;
-    ParentID: TProcessID;
+    function  WaitForMessage: Boolean;
+  public
+    constructor Create;
+    destructor  Destroy; override;
 
-    procedure Execute; override;
-    function  FindKill(Msg: TActorMessage): Boolean;
     procedure Receive(Matching: TMessageFinder;
                       Action: TActOnMessage); overload;
     procedure Receive(Matching: TMessageFinder;
@@ -260,9 +258,45 @@ type
     procedure Receive(Table: TActorMessageTable;
                       Timeout: Cardinal;
                       TimeoutAction: TThunk); overload;
+    procedure Send(Target: TProcessID; MsgName: String); overload;
+    procedure Send(Target: TProcessID; MsgName: String; Parameters: TTuple); overload;
+    procedure Send(Target: TProcessID; T: TTuple); overload;
+
+    property PID:        TProcessID read GetPID;
+    property Terminated: Boolean    read fTerminated write fTerminated;
+  end;
+
+  TActorInterfaceForRPC = class(TActorInterface)
+  private
+    fResult: TTuple;
+  public
+    destructor Destroy; override;
+
+    function  AllMatcher(Msg: TActorMessage): Boolean;
+    procedure NullAction(Msg: TActorMessage);
+    procedure NullThunk;
+    procedure StoreFirstMessage(Msg: TActorMessage);
+
+    property Result: TTuple read fResult;
+  end;
+
+  // I represent an execution context. I send and receive messages to and from
+  // other Actors.
+  TActor = class(TThread)
+  private
+    function  GetPID: TProcessID;
+    procedure ReactToKill(Msg: TActorMessage);
+    procedure RegisterRequiredActions(Table: TActorMessageTable);
+  protected
+    Intf:     TActorInterface;
+    MsgTable: TActorMessageTable;
+    ParentID: TProcessID;
+
+    procedure Execute; override;
+    function  FindKill(Msg: TActorMessage): Boolean;
+    function  MatchMessageName(Msg: TActorMessage; MsgName: String): Boolean;
     procedure RegisterActions(Table: TActorMessageTable); virtual;
     procedure Run; virtual;
-    procedure Send(Target: TProcessID; Msg: TTuple);
     procedure SendExceptionalExit(E: Exception);
     procedure SendNormalExit;
     function  Spawn(ActorType: TActorClass): TProcessID;
@@ -272,7 +306,9 @@ type
     constructor Create(Parent: TProcessID); virtual;
     destructor  Destroy; override;
 
-    property PID: TProcessID read fPID;
+    procedure Terminate; reintroduce; virtual;
+
+    property PID: TProcessID read GetPID;
   end;
 
   TThunkActor = class(TActor)
@@ -284,62 +320,7 @@ type
     property Thunk: TThunk read fThunk write fThunk;
   end;
 
-  TEventMapping = class(TObject)
-  private
-    fEvent:  TEvent;
-    fPID:    TProcessID;
-    fResult: TTuple;
-  public
-    constructor Create;
-    destructor  Destroy; override;
-
-    function  HasResult: Boolean;
-    procedure SetResult(Value: TTuple);
-
-    property Event:  TEvent     read fEvent;
-    property PID:    TProcessID read fPID;
-    property Result: TTuple     read fResult;
-  end;
-
-  TEventDictionary = class(TObject)
-  private
-    Events: TObjectList;
-    Lock:   TCriticalSection;
-
-    function  IndexOf(E: TEvent): Integer; overload;
-    function  IndexOf(PID: TProcessID): Integer; overload;
-    function  MappingAt(Index: Integer): TEventMapping;
-  public
-    constructor Create;
-    destructor  Destroy; override;
-
-    function  DataFor(E: TEvent): TTuple;
-    function  EventFor(PID: TProcessID): TEvent;
-    function  IsEmpty: Boolean;
-    function  PIDFor(E: TEvent): TProcessID;
-    function  ReserveEvent: TEvent;
-    procedure StoreDataFor(E: TEvent; Data: TTuple); overload;
-    procedure StoreDataFor(PID: TProcessID; Data: TTuple); overload;
-    procedure UnreserveEvent(E: TEvent);
-  end;
-
   TRootActor = class(TActor)
-  end;
-
-  // I act as a single-shot proxy for non-Actors: I receive an rpc-proxy
-  // message, and forward the contained message on to the targeted Actor. Then
-  // I wait for a response from that Actor. When I get one, I store the
-  // response set against the reserved Event, set that Event, and terminate.
-  TProxyActor = class(TActor)
-  private
-    EventPID: TProcessID;
-
-    function  FindProxy(Msg: TActorMessage): Boolean;
-    function  FindResponse(Msg: TActorMessage): Boolean;
-    procedure ProxyMsg(Msg: TActorMessage);
-    procedure RelayResponse(Msg: TActorMessage);
-  protected
-    procedure RegisterActions(Table: TActorMessageTable); override;
   end;
 
   // I translate messages sent to me into PostMessages to a Windows message
@@ -383,8 +364,8 @@ const
   ExitMsg             = 'exit';
   ExitReasonException = '%s: %s';
   ExitReasonNormal    = 'normal';
-  ExitReasonKill       = 'kill';
-  RpcProxyMsg          = 'rpc-proxy';
+  ExitReasonKill      = 'kill';
+  RpcProxyMsg         = 'rpc-proxy';
 
 // String conversion
 const
@@ -396,6 +377,10 @@ type
   TActorMsgProc    = procedure(PID: String; Data: TTuple);
   TMessageSendProc = procedure(Sender, Target: TProcessID; Msg: TActorMessage);
 
+const
+  OneMillisecond = 1/86400/1000; // One Millisecond in TDateTime format.
+  OneSecond      = 1000; // milliseconds
+
 var
   OnActorCreatedHook: TActorEventProc;
   OnActorExitedHook:  TActorMsgProc;
@@ -406,7 +391,6 @@ implementation
 var
   Actors:    TStringList;
   Root:      TActor;
-  RpcEvents: TEventDictionary;
   ActorLock: TCriticalSection; // Used to lock access to Actors.
   UsedPIDs:  TStringList;
 
@@ -476,7 +460,21 @@ begin
   end;
 end;
 
-function PrimitiveRegisterActor(A: TActor): TProcessID;
+procedure PrimitiveReceive(Mailbox: TActorMailbox; Table: TActorMessageTable);
+var
+  I:   Integer;
+  Msg: TActorMessage;
+begin
+  Msg := Mailbox.FindAndProcessMessage(Table, I);
+  try
+    if Assigned(Msg) then
+      Table.Actions[I](Msg);
+  finally
+    Msg.Free;
+  end;
+end;
+
+function PrimitiveRegisterActor(A: TActorMailbox): TProcessID;
 begin
   ActorLock.Acquire;
   try
@@ -498,13 +496,13 @@ procedure PrimitiveSend(Sender, Target: TProcessID; Msg: TTuple);
       Index := Actors.IndexOf(Target);
 
       if (Index <> -1) then
-        TActor(Actors.Objects[Index]).Mailbox.AddMessage(Msg);
+        (Actors.Objects[Index] as TActorMailbox).AddMessage(Msg);
     finally
       ActorLock.Release;
     end;
   end;
 var
-  AMsg: TActorMessage;  
+  AMsg: TActorMessage;
 begin
   // Send a message Msg from Sender to Target.
   //
@@ -522,7 +520,7 @@ begin
   end;
 end;
 
-procedure PrimitiveUnregisterActor(A: TActor);
+procedure PrimitiveUnregisterActor(A: TActorMailbox);
 var
   Index: Integer;
 begin
@@ -557,59 +555,27 @@ begin
 end;
 
 function RPC(Target: TProcessID; Msg: TTuple; Timeout: Cardinal): TTuple;
-const
-  OneMillisecond = 1/86400/1000; // One Millisecond in TDateTime format.
 var
-  E:        TEvent;
-  EndTime:  TDateTime;
-  ErrorMsg: String;
-  ProxyMsg: TRpcProxyTuple;
-  Proxy:    TProcessID;
-  Wait:     TWaitResult;
+  Intf:        TActorInterfaceForRPC;
+  ReroutedMsg: TTuple;
 begin
-  // Ikaria keeps a pool of mutexes. When you call RPC, it reserves one of these
-  // mutexes (call it E). It then asks the RootActor to forward Msg on to the
-  // Target actor. RPC then busy-waits. If RPC waits for longer than Timeout
-  // milliseconds, it raises an ETimeout exception. When RootActor receives a
-  // response from Target, it sets E.
-
   Result := nil;
 
-  EndTime := Now + Timeout*OneMillisecond;
-  E := RpcEvents.ReserveEvent;
+  Intf := TActorInterfaceForRPC.Create;
   try
-    ProxyMsg := TRpcProxyTuple.Create(RpcEvents.PIDFor(E), Target, Msg);
+    ReroutedMsg := Msg.RouteTo(Intf.PID);
     try
-      Proxy := Spawn(TProxyActor);
-      SendActorMessage(Proxy, ProxyMsg);
+      Intf.Send(Target, ReroutedMsg);
     finally
-      ProxyMsg.Free;
+      ReroutedMsg.Free;
     end;
 
-    while (Now < EndTime) do begin
-      Wait := E.WaitFor(Timeout);
+    Intf.Receive(Intf.AllMatcher, Intf.StoreFirstMessage, Timeout, Intf.NullThunk);
 
-      case Wait of
-        wrSignaled: begin
-          // We received a response: return it.
-          Result := RpcEvents.DataFor(E).Copy as TTuple;
-          Break;
-        end;
-        wrTimeout:;
-      else
-        if (Wait = wrError) then
-          ErrorMsg := SysErrorMessage(E.LastError)
-        else // wrAbandoned
-          ErrorMsg := 'Event abandoned';
-
-        raise ETimeout.Create(Format('Unexpected result waiting for response to message %s: %s', [Msg.AsString, ErrorMsg]));
-      end;
-    end;
-
-    if not Assigned(Result) then
-      raise ETimeout.Create(Format('Timeout waiting for response to message %s', [Msg.AsString]));
+    if (Intf.Result <> nil) then
+      Result := Intf.Result.Copy as TTuple;
   finally
-    RpcEvents.UnreserveEvent(E);
+    Intf.Free;
   end;
 end;
 
@@ -879,7 +845,7 @@ var
   I: Integer;
   NewT: TTuple;
 begin
-  NewT := TTupleClass(Self.ClassType).Create;
+  NewT := Self.ThisClassType.Create;
 
   for I := 0 to Self.Count - 1 do
     NewT.Add(Self[I]);
@@ -915,14 +881,18 @@ function TTuple.RouteTo(NewDest: TProcessID): TTuple;
 var
   I: Integer;
 begin
-  // "RouteToing" means rewriting the sender's PID (in the first element) with a
+  // "RouteToing" means rewriting the sender's PID (in the second element) with a
   // new PID. Thus, the recipient of the message will route the response to
   // NewDest.
 
-  Result := TTuple.Create;
+  Result := Self.ThisClassType.Create;
+
+  if (Self.Count = 0) then Exit;
+
+  Result.Add(Self[0]);
 
   Result.AddProcessID(NewDest);
-  for I := 1 to Self.Count - 1 do
+  for I := 2 to Self.Count - 1 do
     Result.Add(Self[I]);
 end;
 
@@ -936,6 +906,11 @@ end;
 function TTuple.GetElement(Index: Integer): TTupleElement;
 begin
   Result := Self.TupleElements[Index] as TTupleElement;
+end;
+
+function TTuple.ThisClassType: TTupleClass;
+begin
+  Result := TTupleClass(Self.ClassType);
 end;
 
 //******************************************************************************
@@ -1079,12 +1054,15 @@ begin
   Self.Lock      := TCriticalSection.Create;
   Self.Messages  := TObjectList.Create(false);
   Self.SaveQueue := TObjectList.Create(false);
+
+  Self.fPID := PrimitiveRegisterActor(Self);
 end;
 
 destructor TActorMailbox.Destroy;
 begin
   Self.Lock.Acquire;
   try
+    PrimitiveUnregisterActor(Self);
     Self.Purge;
     Self.SaveQueue.Free;
     Self.Messages.Free;
@@ -1328,6 +1306,201 @@ begin
 end;
 
 //******************************************************************************
+//* TActorInterface                                                            *
+//******************************************************************************
+//* TActorInterface Public methods *********************************************
+
+constructor TActorInterface.Create;
+begin
+  inherited Create;
+
+  Self.fTerminated := false;
+  Self.Mailbox     := TActorMailbox.Create;
+  Self.MsgEvent    := TSimpleEvent.Create;
+
+  Self.Mailbox.OnMessageArrived := Self.NewMessageArrived;
+end;
+
+destructor TActorInterface.Destroy;
+begin
+  Self.fTerminated := true;
+  Self.MsgEvent.Free;
+  Self.Mailbox.Free;
+
+  inherited Destroy;
+end;
+
+procedure TActorInterface.Receive(Matching: TMessageFinder;
+                                  Action: TActOnMessage);
+var
+  T: TActorMessageTable;
+begin
+  T := TActorMessageTable.Create;
+  try
+    T.Add(Matching, Action);
+    Self.Receive(T);
+  finally
+    T.Free;
+  end;
+end;
+
+procedure TActorInterface.Receive(Matching: TMessageFinder;
+                                  Action: TActOnMessage;
+                                  Timeout: Cardinal;
+                                  TimeoutAction: TThunk);
+var
+  T: TActorMessageTable;
+begin
+  T := TActorMessageTable.Create;
+  try
+    T.Add(Matching, Action);
+    Self.Receive(T, Timeout, TimeoutAction);
+  finally
+    T.Free;
+  end;
+end;
+
+procedure TActorInterface.Receive(Table: TActorMessageTable);
+begin
+  // Block execution (for an unbounded length of time) until we receive a
+  // message matching a condition in Table.
+
+  while not Self.Terminated do begin
+    if Self.WaitForMessage then begin
+      PrimitiveReceive(Self.Mailbox, Table);
+      Break;
+    end;
+  end;
+end;
+
+procedure TActorInterface.Receive(Table: TActorMessageTable;
+                                  Timeout: Cardinal;
+                                  TimeoutAction: TThunk);
+var
+  EndTime:  TDateTime;
+  Finished: Boolean;
+begin
+  // Block execution until we receive a message matching condition in Table. If
+  // we wait more than Timeout milliseconds, run TimeoutAction. If something bad
+  // happens, raise an exception.
+
+  EndTime  := Now + Timeout*OneMillisecond;
+  Finished := false;
+
+  while not Self.Terminated and (Now < EndTime) do begin
+    if Self.WaitForMessage then begin
+      PrimitiveReceive(Self.Mailbox, Table);
+      Finished := true;
+      Break;
+    end;
+  end;
+
+  if not Self.Terminated and not Finished then TimeoutAction;
+end;
+
+procedure TActorInterface.Send(Target: TProcessID; MsgName: String);
+var
+  NoParams: TTuple;
+begin
+  NoParams := TTuple.Create;
+  try
+    Self.Send(Target, MsgName, NoParams);
+  finally
+    NoParams.Free;
+  end;
+end;
+
+procedure TActorInterface.Send(Target: TProcessID; MsgName: String; Parameters: TTuple);
+var
+  Msg: TMessageTuple;
+begin
+  Msg := TMessageTuple.Create(MsgName, Self.Mailbox.PID, Parameters);
+  try
+    Self.Send(Target, Msg);
+  finally
+    Msg.Free;
+  end;
+end;
+
+procedure TActorInterface.Send(Target: TProcessID; T: TTuple);
+begin
+  PrimitiveSend(Self.Mailbox.PID, Target, T);
+end;
+
+//* TActorInterface Private methods ********************************************
+
+function TActorInterface.GetPID: TProcessID;
+begin
+  Result := Self.Mailbox.PID;
+end;
+
+procedure TActorInterface.NewMessageArrived(Sender: TObject);
+begin
+  // This executes in the context of whatever thread's currently controlling the
+  // mailbox.
+  // Sender points to the mailbox.
+
+  Self.MsgEvent.SetEvent;
+end;
+
+function TActorInterface.WaitForMessage: Boolean;
+  procedure Fail(Reason: String);
+  const
+    ErrorMsg = 'Unexpected result waiting for response: %s';
+  begin
+    raise ETimeout.Create(Format(ErrorMsg, [Reason]));
+  end;
+var
+  ErrorMsg: String;
+begin
+  // Return true if we received a message, false otherwise.
+  // If something goes badly wrong, raise an exception.
+
+  Result := false;
+  ErrorMsg := 'Unexpected result waiting for response: %s';
+
+  case Self.MsgEvent.WaitFor(OneSecond) of
+    wrSignaled:  Result := true;
+    wrTimeout:   ; // Just keep waiting
+    wrError:     Fail(SysErrorMessage(Self.MsgEvent.LastError));
+    wrAbandoned: Fail('Event abandoned');
+  else
+    Fail('Unknown error');
+  end;
+end;
+
+//******************************************************************************
+//* TActorInterfaceForRPC                                                      *
+//******************************************************************************
+//* TActorInterfaceForRPC Public methods ***************************************
+
+destructor TActorInterfaceForRPC.Destroy;
+begin
+  Self.fResult.Free;
+
+  inherited Destroy;
+end;
+
+function TActorInterfaceForRPC.AllMatcher(Msg: TActorMessage): Boolean;
+begin
+  Result := true;
+end;
+
+procedure TActorInterfaceForRPC.NullAction(Msg: TActorMessage);
+begin
+end;
+
+procedure TActorInterfaceForRPC.NullThunk;
+begin
+end;
+
+procedure TActorInterfaceForRPC.StoreFirstMessage(Msg: TActorMessage);
+begin
+  Self.fResult := Msg.Data.Copy as TTuple;
+end;
+
+
+//******************************************************************************
 //* TActor                                                                     *
 //******************************************************************************
 //* TActor Public methods ******************************************************
@@ -1355,30 +1528,30 @@ begin
 
   Self.ParentID := Parent;
 
-  Self.Mailbox  := TActorMailbox.Create;
-  Self.Mailbox.OnMessageArrived := Self.NewMessageArrived;
+  Self.Intf := TActorInterface.Create;
 
-  Self.MsgEvent := TSimpleEvent.Create;
   Self.MsgTable := TActorMessageTable.Create;
   Self.RegisterRequiredActions(Self.MsgTable);
   Self.RegisterActions(Self.MsgTable);
-
-  Self.fPID := PrimitiveRegisterActor(Self);
 
   NotifyOfActorCreation(Self.ClassName, Self.PID);
 end;
 
 destructor TActor.Destroy;
 begin
-  PrimitiveUnregisterActor(Self);
   // Notify all known actors of freeing!
 
-  Self.Mailbox.OnMessageArrived := nil;
   Self.MsgTable.Free;
-  Self.MsgEvent.Free;
-  Self.Mailbox.Free;
+  Self.Intf.Free;
 
   inherited Destroy;
+end;
+
+procedure TActor.Terminate;
+begin
+  Self.Intf.Terminated := true;
+
+  inherited Terminate;
 end;
 
 //* TActor Protected methods ***************************************************
@@ -1406,55 +1579,19 @@ begin
   end;
 end;
 
-procedure TActor.Receive(Matching: TMessageFinder;
-                         Action: TActOnMessage);
-begin
-  Self.Receive(Matching, Action, 0, Self.NullMethod);
-end;
-
-procedure TActor.Receive(Matching: TMessageFinder;
-                         Action: TActOnMessage;
-                         Timeout: Cardinal;
-                         TimeoutAction: TThunk);
+function TActor.MatchMessageName(Msg: TActorMessage; MsgName: String): Boolean;
 var
-  T: TActorMessageTable;
+  O: TMessageTuple;
 begin
-  T := TActorMessageTable.Create;
   try
-    T.Add(Matching, Action);
-    Self.Receive(T, Timeout, TimeoutAction);
-  finally
-    T.Free;
-  end;
-end;
-
-procedure TActor.Receive(Table: TActorMessageTable);
-begin
-  Self.Receive(Table, 0, Self.NullMethod);
-end;
-
-procedure TActor.Receive(Table: TActorMessageTable;
-                         Timeout: Cardinal;
-                         TimeoutAction: TThunk);
-var
-  I:   Integer;
-  Msg: TActorMessage;
-begin
-  // Block execution until we receive a message matching the condition/s defined
-  // by the function Matching.
-
-  while not Self.Terminated do begin
-    Msg := Self.Mailbox.FindAndProcessMessage(Table, I);
+    O := TMessageTuple.Overlay(Msg.Data);
     try
-      if Assigned(Msg) then
-        Table.Actions[I](Msg);
+      Result := O.MessageName = MsgName;
     finally
-      Msg.Free;
+      O.Free;
     end;
-
-    // If we're terminated, there's no sense waiting.
-    if not Self.Terminated then
-      Self.WaitForMessage(1000);
+  except
+    Result := false;
   end;
 end;
 
@@ -1466,7 +1603,7 @@ end;
 procedure TActor.Run;
 begin
   while not Self.Terminated do
-    Self.Receive(Self.MsgTable);
+    Self.Intf.Receive(Self.MsgTable);
 end;
 
 procedure TActor.SendExceptionalExit(E: Exception);
@@ -1507,14 +1644,6 @@ begin
   end;
 end;
 
-procedure TActor.Send(Target: TProcessID; Msg: TTuple);
-begin
-//  if (ActorReferences.IndexOf(Target) = -1) then
-//    raise EActorException.Create(Format('Actor %s sent a message of type %s to an unknown target: %s', [Self.PID, Msg.ClassName, Target]));
-
-  PrimitiveSend(Self.PID, Target, Msg);
-end;
-
 function TActor.Spawn(ActorType: TActorClass): TProcessID;
 var
   A: TActor;
@@ -1528,18 +1657,9 @@ end;
 
 //* TActor Private methods *****************************************************
 
-procedure TActor.NewMessageArrived(Sender: TObject);
+function TActor.GetPID: TProcessID;
 begin
-  // This executes in the context of whatever thread's currently controlling the
-  // mailbox.
-  // Sender points to the mailbox.
-
-  Self.MsgEvent.SetEvent;
-end;
-
-procedure TActor.NullMethod;
-begin
-  // Do nothing.
+  Result := Self.Intf.PID;
 end;
 
 procedure TActor.ReactToKill(Msg: TActorMessage);
@@ -1550,12 +1670,6 @@ end;
 procedure TActor.RegisterRequiredActions(Table: TActorMessageTable);
 begin
   Table.Add(Self.FindKill, Self.ReactToKill);
-end;
-
-procedure TActor.WaitForMessage(MillisecondTimeout: Cardinal);
-begin
-  Self.MsgEvent.WaitFor(MillisecondTimeout);
-  Self.MsgEvent.ResetEvent;
 end;
 
 //******************************************************************************
@@ -1569,102 +1683,6 @@ begin
 end;
 
 //******************************************************************************
-//* TEventMapping                                                              *
-//******************************************************************************
-//* TEventMapping Public methods ***********************************************
-
-constructor TEventMapping.Create;
-begin
-  inherited Create;
-
-  Self.fEvent := TSimpleEvent.Create;
-  Self.fPID   := NextPID;
-end;
-
-destructor TEventMapping.Destroy;
-begin
-  Self.Event.Free;
-  Self.Result.Free;
-
-  inherited Destroy;
-end;
-
-function TEventMapping.HasResult: Boolean;
-begin
-  Result := Assigned(Self.Result);
-end;
-
-procedure TEventMapping.SetResult(Value: TTuple);
-begin
-  if not Assigned(Self.fResult) then
-    Self.fResult := Value.Copy as TTuple;
-end;
-
-//******************************************************************************
-//* TProxyActor                                                                *
-//******************************************************************************
-//* TProxyActor Protected methods **********************************************
-
-function TProxyActor.FindProxy(Msg: TActorMessage): Boolean;
-begin
-  // ("proxy-msg" <ID> (<Target_PID> <actual_msg>))
-  Result := (Msg.Data.Count > 1)
-        and Msg.Data[0].IsString
-        and (TStringElement(Msg.Data[0]).Value = RpcProxyMsg);
-end;
-
-function TProxyActor.FindResponse(Msg: TActorMessage): Boolean;
-begin
-  Result := not Self.FindProxy(Msg);
-end;
-
-procedure TProxyActor.ProxyMsg(Msg: TActorMessage);
-var
-  ReroutedMsg: TTuple;
-  Proxy:       TRpcProxyTuple;
-begin
-  Proxy := TRpcProxyTuple.Overlay(Msg.Data);
-  try
-//    try
-      Self.EventPID := Proxy.ReplyTo;
-//    except
-//      on E: EListError do
-//        Self.EventPID := '';
-//    end;
-
-    ReroutedMsg := Proxy.Message.RouteTo(Self.PID);
-    try
-      Self.Send(Proxy.TargetPID, ReroutedMsg);
-    finally
-      ReroutedMsg.Free;
-    end;
-  finally
-    Proxy.Free;
-  end;
-end;
-
-procedure TProxyActor.RelayResponse(Msg: TActorMessage);
-var
-  E: TEvent;
-begin
-  RpcEvents.StoreDataFor(Self.EventPID, Msg.Data);
-  E := RpcEvents.EventFor(Self.EventPID);
-
-  if Assigned(E) then
-    E.SetEvent;
-
-  Self.Terminate;
-end;
-
-//* TProxyActor Private methods ************************************************
-
-procedure TProxyActor.RegisterActions(Table: TActorMessageTable);
-begin
-  Table.Add(Self.FindProxy, Self.ProxyMsg);
-  Table.Add(Self.FindResponse, Self.RelayResponse);
-end;
-
-//******************************************************************************
 //* TWindowsMessageForwarder                                                   *
 //******************************************************************************
 //* TWindowsMessageForwarder Protected methods *********************************
@@ -1672,7 +1690,7 @@ end;
 procedure TWindowsMessageForwarder.Run;
 begin
   while not Self.Terminated do begin
-    Self.Receive(Self.MatchAll, Self.ForwardToMessageQueue);
+    Self.Intf.Receive(Self.MatchAll, Self.ForwardToMessageQueue);
   end;
 end;
 
@@ -1690,190 +1708,9 @@ begin
   // * send to a Windows message queue.
 end;
 
-//******************************************************************************
-//* TEventDictionary                                                           *
-//******************************************************************************
-//* TEventDictionary Public methods ********************************************
-
-constructor TEventDictionary.Create;
-begin
-  inherited Create;
-
-  Self.Events := TObjectList.Create;
-  Self.Lock   := TCriticalSection.Create;
-end;
-
-destructor TEventDictionary.Destroy;
-begin
-  Self.Lock.Free;
-  Self.Events.Free;
-
-  inherited Destroy;
-end;
-
-function TEventDictionary.DataFor(E: TEvent): TTuple;
-var
-  Index: Integer;
-begin
-  // Return the result associated with E. If E isn't a reserved event, or there
-  // is no result (yet) associated with E, return nil.
-
-  Self.Lock.Acquire;
-  try
-    Index := Self.IndexOf(E);
-
-    if (Index <> -1) then
-      Result := Self.MappingAt(Index).Result
-    else
-      Result := nil;
-  finally
-    Self.Lock.Release;
-  end;
-end;
-
-function TEventDictionary.EventFor(PID: TProcessID): TEvent;
-var
-  Index: Integer;
-begin
-  // Return the Event associated with PID, or nil.
-
-  Self.Lock.Acquire;
-  try
-    Index := Self.IndexOf(PID);
-
-    if (Index <> -1) then
-      Result := Self.MappingAt(Index).Event
-    else
-      Result := nil;
-  finally
-    Self.Lock.Release;
-  end;
-end;
-
-function TEventDictionary.IsEmpty: Boolean;
-begin
-  Self.Lock.Acquire;
-  try
-    Result := Self.Events.Count = 0;
-  finally
-    Self.Lock.Release;
-  end;
-end;
-
-function TEventDictionary.PIDFor(E: TEvent): TProcessID;
-var
-  Index: Integer;
-begin
-  Self.Lock.Acquire;
-  try
-    Index := Self.IndexOf(E);
-
-    if (Index <> -1) then
-      Result := Self.MappingAt(Index).PID
-    else
-      Result := '';
-  finally
-    Self.Lock.Release;
-  end;
-end;
-
-function TEventDictionary.ReserveEvent: TEvent;
-var
-  Map: TEventMapping;
-begin
-  Self.Lock.Acquire;
-  try
-    Map := TEventMapping.Create;
-    Self.Events.Add(Map);
-
-    Result := Map.Event;
-  finally
-    Self.Lock.Release;
-  end;
-end;
-
-procedure TEventDictionary.StoreDataFor(E: TEvent; Data: TTuple);
-var
-  Index: Integer;
-begin
-  Self.Lock.Acquire;
-  try
-    Index := Self.IndexOf(E);
-
-    if (Index <> -1) then
-      Self.MappingAt(Index).SetResult(Data);
-  finally
-    Self.Lock.Release;
-  end;
-end;
-
-procedure TEventDictionary.StoreDataFor(PID: TProcessID; Data: TTuple);
-var
-  Index: Integer;
-begin
-  Self.Lock.Acquire;
-  try
-    Index := Self.IndexOf(PID);
-
-    if (Index <> -1) then
-      Self.MappingAt(Index).SetResult(Data);
-  finally
-    Self.Lock.Release;
-  end;
-end;
-
-procedure TEventDictionary.UnreserveEvent(E: TEvent);
-var
-  Index: Integer;
-begin
-  Self.Lock.Acquire;
-  try
-    Index := Self.IndexOf(E);
-
-    if (Index <> -1) then
-      Self.Events.Delete(Index);
-  finally
-    Self.Lock.Release;
-  end;
-end;
-
-//* TEventDictionary Private methods *******************************************
-
-function TEventDictionary.IndexOf(E: TEvent): Integer;
-var
-  I: Integer;
-begin
-  Result := -1;
-  for I := 0 to Self.Events.Count - 1 do begin
-    if (Self.MappingAt(I).Event = E) then begin
-      Result := I;
-      Break;
-    end;
-  end;
-end;
-
-function TEventDictionary.IndexOf(PID: TProcessID): Integer;
-var
-  I: Integer;
-begin
-  Result := -1;
-  for I := 0 to Self.Events.Count - 1 do begin
-    if (Self.MappingAt(I).PID = PID) then begin
-      Result := I;
-      Break;
-    end;
-  end;
-end;
-
-function TEventDictionary.MappingAt(Index: Integer): TEventMapping;
-begin
-  Result := Self.Events[Index] as TEventMapping;
-end;
-
 initialization
   ActorLock := TCriticalSection.Create;
   Actors    := TStringList.Create;
-  RpcEvents := TEventDictionary.Create;
   UsedPIDs  := TStringList.Create;
 
   // Tag generation

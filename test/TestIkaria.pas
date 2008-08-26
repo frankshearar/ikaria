@@ -125,6 +125,7 @@ type
     procedure TestEquals;
     procedure TestEqualsOnTree;
     procedure TestRouteTo;
+    procedure TestRouteToPreservesClass;
     procedure TestIsBoolean;
     procedure TestIsInteger;
     procedure TestIsProcessID;
@@ -167,6 +168,25 @@ type
     procedure TestNotifyOfNewMessages;
     procedure TestPurge;
     procedure TestTimeoutRestoresSaveQueueMessages;
+  end;
+
+  TestTActorInterface = class(TTestCase)
+  private
+    FooName:      String;
+    Intf:         TActorInterface;
+    ReceivedAFoo: Boolean;
+    TimedOut:     Boolean;
+
+    procedure ActOnFooMsg(Msg: TActorMessage);
+    function  CreateFooMsg: TTuple;
+    function  RecogniseFooMsg(Msg: TActorMessage): Boolean;
+    procedure Timeout;
+  public
+    procedure SetUp; override;
+    procedure TearDown; override;
+  published
+    procedure TestReceive;
+    procedure TestReceiveWithTimeout;
   end;
 
   TestTActorMessageTable = class(TTestCase)
@@ -220,28 +240,13 @@ type
     procedure TestActorsCanReceiveMessages;
   end;
 
-  TestTEventDictionary = class(TTestCase)
-  private
-    Dict: TEventDictionary;
-  public
-    procedure SetUp; override;
-    procedure TearDown; override;
-  published
-    procedure TestDataFor;
-    procedure TestDataForUnreservedEvent;
-    procedure TestEventFor;
-    procedure TestEventForUnknownPID;
-    procedure TestPIDFor;
-    procedure TestPIDForUnreservedEvent;
-    procedure TestReserveUnreserveEvent;
-    procedure TestUnreserveUnreservedEvent;
-  end;
-
   TestActorFunctions = class(TActorTestCase)
   private
-    TestMsg:  TTuple;
-    ThunkRan: Boolean;
+    TestMsg:    TTuple;
+    ThunkEvent: TEvent;
+    ThunkRan:   Boolean;
 
+    procedure CheckMessageNameEquals(Expected, Received: TTuple; Msg: String);
     procedure TestThunk;
   public
     procedure SetUp; override;
@@ -348,9 +353,9 @@ begin
   Result.AddSuite(TestTTuple.Suite);
   Result.AddSuite(TestTRpcProxyTuple.Suite);
   Result.AddSuite(TestTActorMailbox.Suite);
+  Result.AddSuite(TestTActorInterface.Suite);
   Result.AddSuite(TestTActorMessageTable.Suite);
   Result.AddSuite(TestTActor.Suite);
-  Result.AddSuite(TestTEventDictionary.Suite);
   Result.AddSuite(TestActorFunctions.Suite);
 end;
 
@@ -375,7 +380,7 @@ end;
 
 procedure TEchoActor.EchoMessage(Msg: TActorMessage);
 begin
-  Self.Send(TProcessIDElement(Msg.Data[0]).Value, Msg.Data);
+  Self.Intf.Send(TProcessIDElement(Msg.Data[1]).Value, Msg.Data);
 end;
 
 //******************************************************************************
@@ -384,17 +389,8 @@ end;
 //* TSingleShotActor Protected methods *****************************************
 
 procedure TSingleShotActor.Run;
-var
-  Ping: TTuple;
 begin
-  Ping := TTuple.Create;
-  try
-    Ping.AddProcessID(Self.PID);
-    Ping.AddString('ping');
-    Self.Send(Self.ParentID, Ping);
-  finally
-    Ping.Free;
-  end;
+  Self.Intf.Send(Self.ParentID, 'ping');
 end;
 
 //******************************************************************************
@@ -1009,18 +1005,37 @@ var
   H: TTuple;
   I: Integer;
 begin
-  Self.T.AddProcessID(OldPID);
   Self.T.AddString('some-msg');
+  Self.T.AddProcessID(OldPID);
   Self.T.AddInteger(42);
 
   H := Self.T.RouteTo(NewPID);
   try
-    Check(H[0].IsProcessID, 'First element of new msg isn''t a PID');
+    Check(H[1].IsProcessID, 'Second element of new msg isn''t a PID');
     CheckEquals(Self.T.Count, H.Count, 'Not all elements copied');
     for I := 1 to Self.T.Count - 1 do
-      CheckEquals(Self.T[I].AsString, H[I].AsString, Format('Element %d', [I]));
+      if (I <> 1) then
+        CheckEquals(Self.T[I].AsString, H[I].AsString, Format('Element %d', [I]));
   finally
     H.Free;
+  end;
+end;
+
+procedure TestTTuple.TestRouteToPreservesClass;
+const
+  OldPID: TProcessID = 'old-pid';
+  NewPID: TProcessID = 'new-pid';
+var
+  NewMsg: TTuple;
+  OldMsg: TTuple;
+begin
+  OldMsg := TMessageTuple.Create('some-msg', OldPID);
+  try
+    NewMsg := OldMsg.RouteTo(NewPID);
+
+    CheckEquals(OldMsg.ClassType, NewMsg.ClassType, 'RouteTo didn''t preserve class type');
+  finally
+    OldMsg.Free;
   end;
 end;
 
@@ -1276,6 +1291,101 @@ begin
 end;
 
 //******************************************************************************
+//* TestTActorInterface                                                        *
+//******************************************************************************
+//* TestTActorInterface Public methods *****************************************
+
+procedure TestTActorInterface.SetUp;
+begin
+  inherited SetUp;
+
+  Self.FooName := 'Foo';
+  Self.Intf    := TActorInterface.Create;
+
+  Self.ReceivedAFoo := false;
+  Self.TimedOut     := false;
+end;
+
+procedure TestTActorInterface.TearDown;
+begin
+  Self.Intf.Free;
+
+  inherited TearDown;
+end;
+
+//* TestTActorInterface Private methods ****************************************
+
+
+procedure TestTActorInterface.ActOnFooMsg(Msg: TActorMessage);
+begin
+  Self.ReceivedAFoo := true;
+end;
+
+function TestTActorInterface.CreateFooMsg: TTuple;
+var
+  M: TMessageTuple;
+begin
+  M := TMessageTuple.Create(FooName, Self.Intf.PID);
+  Result := M;
+end;
+
+function TestTActorInterface.RecogniseFooMsg(Msg: TActorMessage): Boolean;
+var
+  O: TMessageTuple;
+begin
+  try
+    O := TMessageTuple.Overlay(Msg.Data);
+    try
+      Result := O.MessageName = FooName;
+    finally
+      O.Free;
+    end;
+  except
+    Result := false;
+  end;
+end;
+
+procedure TestTActorInterface.Timeout;
+begin
+  Self.TimedOut := true;
+end;
+
+//* TestTActorInterface Published methods **************************************
+
+procedure TestTActorInterface.TestReceive;
+var
+  Foo: TTuple;
+begin
+  Foo := Self.CreateFooMsg;
+  try
+    SendActorMessage(Self.Intf.PID, Foo);
+  finally
+    Foo.Free;
+  end;
+
+  Self.Intf.Receive(Self.RecogniseFooMsg, Self.ActOnFooMsg);
+
+  Check(Self.ReceivedAFoo, 'Didn''t receive a message');
+end;
+
+procedure TestTActorInterface.TestReceiveWithTimeout;
+var
+  Foo: TTuple;
+begin
+  Foo := Self.CreateFooMsg;
+  try
+    SendActorMessage(Self.Intf.PID, Foo);
+  finally
+    Foo.Free;
+  end;
+
+  Self.Intf.Receive(Self.RecogniseFooMsg, Self.ActOnFooMsg, 0, Self.Timeout);
+
+  Check(not Self.ReceivedAFoo, 'Received a message');
+  Check(Self.TimedOut,         'Timeout action not invoked');
+end;  
+
+//******************************************************************************
 //* TestTActorMessageTable                                                     *
 //******************************************************************************
 //* TestTActorMessageTable Public methods **************************************
@@ -1500,163 +1610,6 @@ begin
 end;
 
 //******************************************************************************
-//* TestTEventDictionary                                                       *
-//******************************************************************************
-//* TestTEventDictionary Public methods ****************************************
-
-procedure TestTEventDictionary.SetUp;
-begin
-  inherited SetUp;
-
-  Self.Dict := TEventDictionary.Create;
-end;
-
-procedure TestTEventDictionary.TearDown;
-begin
-  Self.Dict.Free;
-
-  inherited TearDown;
-end;
-
-//* TestTEventDictionary Published methods *************************************
-
-procedure TestTEventDictionary.TestDataFor;
-var
-  Data:   TTuple;
-  E1, E2: TEvent;
-  S:      String;
-begin
-  E1 := Self.Dict.ReserveEvent;
-  try
-    E2 := Self.Dict.ReserveEvent;
-    try
-      Data := TTuple.Create;
-      try
-        Data.AddString('result');
-        S := Data.AsString;
-        Check(nil = Self.Dict.DataFor(E1), 'DataFor before StoreDataFor');
-        Self.Dict.StoreDataFor(E1, Data);
-        Check(nil <> Self.Dict.DataFor(E1), 'StoreDataFor(Event, Tuple) didn''t store data');
-        CheckEquals(Data.AsString, Self.Dict.DataFor(E1).AsString, 'Wrong data stored using Event');
-
-        Check(nil = Self.Dict.DataFor(E2), 'StoreDataFor stored data with wrong event');
-
-        Self.Dict.StoreDataFor(Self.Dict.PIDFor(E2), Data);
-        Check(nil <> Self.Dict.DataFor(E2), 'StoreDataFor(PID, Tuple) didn''t store data');
-        CheckEquals(Data.AsString, Self.Dict.DataFor(E2).AsString, 'Wrong data stored using PID');
-      finally
-        Data.Free;
-      end;
-      CheckEquals(S, Self.Dict.DataFor(E1).AsString, 'StoreDataFor(Event, Tuple) didn''t store a COPY');
-      CheckEquals(S, Self.Dict.DataFor(E2).AsString, 'StoreDataFor(PID, Tuple) didn''t store a COPY');
-    finally
-      Self.Dict.UnreserveEvent(E2);
-    end;
-  finally
-    Self.Dict.UnreserveEvent(E1);
-  end;
-end;
-
-procedure TestTEventDictionary.TestDataForUnreservedEvent;
-var
-  E: TEvent;
-begin
-  Check(nil = Self.Dict.DataFor(nil), 'DataFor(nil)');
-
-  E := TSimpleEvent.Create;
-  try
-    Check(nil = Self.Dict.DataFor(E), 'DataFor(unreserved event)');
-  finally
-    E.Free;
-  end;
-end;
-
-procedure TestTEventDictionary.TestEventFor;
-var
-  E:   TEvent;
-  PID: TProcessID;
-begin
-  E := Self.Dict.ReserveEvent;
-  try
-    PID := Self.Dict.PIDFor(E);
-    Check(E = Self.Dict.EventFor(PID), 'Using PID, Event not found');
-  finally
-    Self.Dict.UnreserveEvent(E);
-  end;
-end;
-
-procedure TestTEventDictionary.TestEventForUnknownPID;
-begin
-  Check(nil = Self.Dict.EventFor(''), 'EventFor(empty string');
-  Check(nil = Self.Dict.EventFor(ConstructUUID), 'EventFor(unknown PID)');
-end;
-
-procedure TestTEventDictionary.TestPIDFor;
-var
-  E1, E2: TEvent;
-begin
-  // This test doesn't _prove_ that the EventDictionary uses unique PIDs for
-  // each event.
-
-  E1 := Self.Dict.ReserveEvent;
-  try
-    E2 := Self.Dict.ReserveEvent;
-    try
-      CheckNotEquals(Self.Dict.PIDFor(E1), Self.Dict.PIDFor(E2), 'PIDFor returned same PID for different events');
-    finally
-      Self.Dict.UnreserveEvent(E2);
-    end;
-  finally
-    Self.Dict.UnreserveEvent(E1);
-  end;
-end;
-
-procedure TestTEventDictionary.TestPIDForUnreservedEvent;
-var
-  E: TEvent;
-begin
-  CheckEquals('', Self.Dict.PIDFor(nil), 'PIDFor(nil)');
-
-  E := TSimpleEvent.Create;
-  try
-    CheckEquals('', Self.Dict.PIDFor(E), 'PIDFor(unreserved event)');
-  finally
-    E.Free;
-  end;
-end;
-
-procedure TestTEventDictionary.TestReserveUnreserveEvent;
-var
-  E: TEvent;
-begin
-  Check(Self.Dict.IsEmpty, 'New EventDictionary');
-
-  E := Self.Dict.ReserveEvent;
-  try
-    Check(Assigned(E), 'ReserveEvent didn''t return an event');
-    Check(not Self.Dict.IsEmpty, 'EventDictionary still empty');
-  finally
-    Self.Dict.UnreserveEvent(E);
-  end;
-  Check(Self.Dict.IsEmpty, 'EventDictionary not emptied');
-end;
-
-procedure TestTEventDictionary.TestUnreserveUnreservedEvent;
-var
-  E: TEvent;
-begin
-  // Unreserving an event that was never reserved does nothing.
-
-  E := TSimpleEvent.Create;
-  try
-    Self.Dict.UnreserveEvent(E);
-    Self.Dict.UnreserveEvent(nil);
-  finally
-    E.Free;
-  end;
-end;
-
-//******************************************************************************
 //* TestActorFunctions                                                         *
 //******************************************************************************
 //* TestActorFunctions Public methods ******************************************
@@ -1665,15 +1618,15 @@ procedure TestActorFunctions.SetUp;
 begin
   inherited SetUp;
 
-  Self.TestMsg := TTuple.Create;
-  Self.TestMsg.AddString(TestName);
-  Self.TestMsg.AddProcessID(TActor.RootActor);
+  Self.TestMsg    := TMessageTuple.Create(TestName, TActor.RootActor);
+  Self.ThunkEvent := TSimpleEvent.Create;
 
   Self.ThunkRan := false;
 end;
 
 procedure TestActorFunctions.TearDown;
 begin
+  Self.ThunkEvent.Free;
   Self.TestMsg.Free;
 
   inherited TearDown;
@@ -1681,37 +1634,57 @@ end;
 
 //* TestActorFunctions Private methods ***************************************((
 
+procedure TestActorFunctions.CheckMessageNameEquals(Expected, Received: TTuple; Msg: String);
+var
+  ExpectedMsg, ReceivedMsg: TMessageTuple;
+begin
+  CheckEquals(TMessageTuple, Expected.ClassType, Msg + ' (Expected tuple)');
+  CheckEquals(TMessageTuple, Received.ClassType, Msg + ' (Received tuple)');
+  ExpectedMsg := TMessageTuple.Overlay(Expected) as TMessageTuple;
+  try
+    ReceivedMsg := TMessageTuple.Overlay(Received) as TMessageTuple;
+    try
+      CheckEquals(ExpectedMsg.MessageName, ReceivedMsg.MessageName, Msg);
+    finally
+      ReceivedMsg.Free;
+    end;
+  finally
+    ExpectedMsg.Free;
+  end;
+end;
+
 procedure TestActorFunctions.TestThunk;
 begin
   Self.ThunkRan := true;
+  Self.ThunkEvent.SetEvent;
 end;
 
 //* TestActorFunctions Published methods ***************************************
 
 procedure TestActorFunctions.TestRPC;
 var
-  AnotherTest:  TTuple;
+  AnotherTest:  TMessageTuple;
   Echo:         TProcessID;
   FirstResult:  TTuple;
   SecondResult: TTuple;
 begin
-  AnotherTest := TTuple.Create;
+  AnotherTest := TMessageTuple.Create(ConstructUUID, TRootActor.RootActor);
   try
-    AnotherTest.AddProcessID(TRootActor.RootActor);
-    AnotherTest.AddProcessID(ConstructUUID);
-
     Echo := Spawn(TEchoActor);
     try
       FirstResult := RPC(Echo, Self.TestMsg, 1000);
       try
-        CheckEquals(Self.TestMsg[1].AsString, FirstResult[1].AsString, 'RPC didn''t return expected result');
+        CheckNotNull(FirstResult, 'RPC didn''t return any result');
+        CheckMessageNameEquals(Self.TestMsg, FirstResult, 'RPC didn''t return expected result');
       finally
         FirstResult.Free;
       end;
 
       SecondResult := RPC(Echo, AnotherTest, 1000);
       try
-        CheckEquals(AnotherTest[1].AsString, SecondResult[1].AsString, '2nd RPC didn''t return expected result');
+        CheckNotNull(FirstResult, '2nd RPC didn''t return any result');
+        // Check message names
+        CheckMessageNameEquals(AnotherTest, SecondResult, '2nd RPC didn''t return expected result');
       finally
         SecondResult.Free;
       end;
@@ -1725,9 +1698,8 @@ end;
 
 procedure TestActorFunctions.TestSpawnThunk;
 begin
-  Spawn(TestThunk);
-  Self.WaitForExit(1000);
-  Check(Self.ThunkRan, 'Thunk didn''t run');
+  Spawn(Self.TestThunk);
+  Self.WaitFor(Self.ThunkEvent, OneSecond, 'Thunk didn''t run');
 end;
 
 initialization;

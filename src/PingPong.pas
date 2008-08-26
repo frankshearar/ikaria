@@ -190,25 +190,23 @@ end;
 //* TPingActor Private methods *************************************************
 
 function TPingActor.FindPong(Msg: TActorMessage): Boolean;
+var
+  T: TMessageTuple;
 begin
-  Result := (Msg.Data.Count > 1)
-        and Msg.Data[0].IsProcessID
-        and Msg.Data[1].IsString
-        and (TStringElement(Msg.Data[1]).Value = PongName);
+  try
+    T := TMessageTuple.Overlay(Msg.Data);
+    try
+      Result := T.MessageName = PongName;
+    finally
+    end;
+  except
+    Result := false;
+  end;
 end;
 
 procedure TPingActor.Ping(PID: TProcessID);
-var
-  P: TTuple;
 begin
-  P := TTuple.Create;
-  try
-    P.AddProcessID(Self.PID);
-    P.AddString(PingName);
-    Self.Send(PID, P);
-  finally
-    P.Free;
-  end;
+  Self.Intf.Send(PID, PingName);
 end;
 
 procedure TPingActor.ReactToPong(Msg: TActorMessage);
@@ -241,25 +239,23 @@ end;
 //* TPongActor Private methods *************************************************
 
 function TPongActor.FindPing(Msg: TActorMessage): Boolean;
+var
+  T: TMessageTuple;
 begin
-  Result := (Msg.Data.Count > 1)
-        and (Msg.Data[0] is TProcessIDElement)
-        and (Msg.Data[1] is TStringElement)
-        and (TStringElement(Msg.Data[1]).Value = PingName);
+  try
+    T := TMessageTuple.Overlay(Msg.Data);
+    try
+      Result := T.MessageName = PingName;
+    finally
+    end;
+  except
+    Result := false;
+  end;
 end;
 
 procedure TPongActor.Pong(PID: TProcessID);
-var
-  P: TTuple;
 begin
-  P := TTuple.Create;
-  try
-    P.AddProcessID(Self.PID);
-    P.AddString(PongName);
-    Self.Send(PID, P);
-  finally
-    P.Free;
-  end;
+  Self.Intf.Send(PID, PongName);
 end;
 
 procedure TPongActor.ReactToPing(Msg: TActorMessage);
@@ -340,7 +336,7 @@ begin
   Answer := TTuple.Create;
   try
     Answer.AddInteger(Self.FibGen.Next);
-    Self.Send(TProcessIDElement(Msg.Data[0]).Value, Answer);
+    Self.Intf.Send(TProcessIDElement(Msg.Data[0]).Value, Answer);
   finally
     Answer.Free;
   end;

@@ -1,9 +1,9 @@
 object PingPongDemo: TPingPongDemo
   Left = 192
   Top = 103
+  Width = 870
+  Height = 640
   Caption = 'Ping Pong Demo'
-  ClientHeight = 613
-  ClientWidth = 862
   Color = clBtnFace
   Font.Charset = DEFAULT_CHARSET
   Font.Color = clWindowText
