@@ -186,19 +186,13 @@ begin
 end;
 
 procedure TClientTcpConnectionActor.SignalClosureTo(Target: TProcessID);
-var
-  Closed: TMessageTuple;
 begin
-  Closed := TMessageTuple.Create(ClosedConnectionMsg, Self.PID);
-  try
-    Self.Send(Target, Closed);
-  finally
-    Closed.Free;
-  end;
+  Self.Intf.Send(Target, ClosedConnectionMsg);
 end;
 
 procedure TClientTcpConnectionActor.SignalOpeningTo(Target: TProcessID);
 begin
+  Self.Intf.Send(Target, ConnectedMsg);
 end;
 
 end.
