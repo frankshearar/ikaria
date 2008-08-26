@@ -18,6 +18,7 @@ type
     Location:        TLocationTuple;
     Server:          TIdTcpServer;
 
+    function  ClientCountOf(S: TIdTcpServer): Integer;
     procedure CountConnections(Thread: TIdPeerThread);
     procedure DoNothing(Thread: TIdPeerThread);
     procedure OnDisconnect(Thread: TIdPeerThread);
@@ -28,6 +29,7 @@ type
   published
     procedure TestClose;
     procedure TestConnect;
+    procedure TestConnectSendsConnectedMessage;
     procedure TestDoubleConnect;
   end;
 
@@ -36,6 +38,9 @@ const
   DefaultTimeout = OneSecond;
 
 implementation
+
+uses
+  Classes;
 
 function Suite: ITestSuite;
 begin
@@ -86,6 +91,18 @@ end;
 
 //* TestTClientTcpConnectionActor Private methods ******************************
 
+function TestTClientTcpConnectionActor.ClientCountOf(S: TIdTcpServer): Integer;
+var
+  L: TList;
+begin
+  L := S.Threads.LockList;
+  try
+    Result := L.Count;
+  finally
+    S.Threads.UnlockList;
+  end;
+end;
+
 procedure TestTClientTcpConnectionActor.CountConnections(Thread: TIdPeerThread);
 begin
   Self.Connected := true;
@@ -112,10 +129,13 @@ end;
 
 procedure TestTClientTcpConnectionActor.TestClose;
 var
+  ClientCount:     Integer;
   CloseConnection: TMessageTuple;
 begin
   SendActorMessage(Self.Connection, Self.ConnectTo);
   Self.WaitFor(Self.ConnEvent, DefaultTimeout, 'No connection made');
+
+  ClientCount := Self.ClientCountOf(Self.Server);
 
   CloseConnection := TMessageTuple.Create(CloseConnectionMsg, '');
   try
@@ -124,13 +144,23 @@ begin
     CloseConnection.Free;
   end;
 
-  Self.WaitFor(Self.DisconEvent, DefaultTimeout, 'Connection not closed');
+  Self.WaitForMsg(DefaultTimeout, 'Connection not closed, or the Actor didn''t tell us');
+
+  Check(ClientCount > Self.ClientCountOf(Self.Server), 'Connection not closed');
 end;
 
 procedure TestTClientTcpConnectionActor.TestConnect;
 begin
   SendActorMessage(Self.Connection, Self.ConnectTo);
   Self.WaitFor(Self.ConnEvent, DefaultTimeout, 'No connection attempt');
+end;
+
+procedure TestTClientTcpConnectionActor.TestConnectSendsConnectedMessage;
+begin
+  SendActorMessage(Self.Connection, Self.ConnectTo);
+
+  Self.WaitForMsg(DefaultTimeout, 'Timed out waiting for opened message');
+  CheckEquals(ConnectedMsg, (Self.LastSentMsg.Data[0] as TStringElement).Value, 'Unexpected message');
 end;
 
 procedure TestTClientTcpConnectionActor.TestDoubleConnect;

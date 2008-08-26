@@ -194,9 +194,10 @@ type
   private
     ActorExited: Boolean;
     ExitEvent:   TEvent;
-    LastSentMsg: TActorMessage;
     MsgEvent:    TEvent;
   protected
+    LastSentMsg: TActorMessage;
+
     procedure NotifyOfExit(PID: String; Reason: TTuple);
     procedure StoreLastSentMessage(Sender, Target: TProcessID; Msg: TActorMessage);
     procedure WaitFor(E: TEvent; Timeout: Cardinal; Msg: String);

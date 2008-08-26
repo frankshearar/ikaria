@@ -32,7 +32,7 @@ type
   end;
 
   // An Actor that sends the following messages:
-  // * ConnectionClosed
+  // * ("closed" {own-pid})
   // * ConnectionOpened
   // * Error
   // * Exit
@@ -44,11 +44,14 @@ type
   TClientTcpConnectionActor = class(TActor)
   private
     Connection: TIdTcpClient;
+    Controller: TProcessID;
 
     procedure Close(Msg: TActorMessage);
     procedure Connect(Msg: TActorMessage);
     function  FindClose(Msg: TActorMessage): Boolean;
     function  FindConnect(Msg: TActorMessage): Boolean;
+    procedure SignalClosureTo(Target: TProcessID);
+    procedure SignalOpeningTo(Target: TProcessID);
   protected
     procedure RegisterActions(Table: TActorMessageTable); override;
   public
@@ -57,8 +60,10 @@ type
   end;
 
 const
-  CloseConnectionMsg = 'close';
-  ConnectMsg         = 'connect';
+  CloseConnectionMsg  = 'close';
+  ClosedConnectionMsg = 'closed';
+  ConnectMsg          = 'connect';
+  ConnectedMsg        = 'connected';
 
 implementation
 
@@ -144,6 +149,8 @@ end;
 procedure TClientTcpConnectionActor.Close(Msg: TActorMessage);
 begin
   Self.Connection.Disconnect;
+
+  Self.SignalClosureTo(Self.Controller);
 end;
 
 procedure TClientTcpConnectionActor.Connect(Msg: TActorMessage);
@@ -154,12 +161,16 @@ begin
 
   Conn := TConnectMsg.Overlay(Msg.Data);
   try
+    Self.Controller := Conn.ReplyTo;
+
     Self.Connection.Host := Conn.Location.Address;
     Self.Connection.Port := Conn.Location.Port;
     Self.Connection.Connect;
   finally
     Conn.Free;
   end;
+
+  Self.SignalOpeningTo(Self.Controller);
 end;
 
 function TClientTcpConnectionActor.FindClose(Msg: TActorMessage): Boolean;
@@ -172,6 +183,22 @@ function TClientTcpConnectionActor.FindConnect(Msg: TActorMessage): Boolean;
 begin
   Result := (Msg.Data.Count > 0)
          and ((Msg.Data[0] as TStringElement).Value = ConnectMsg);
+end;
+
+procedure TClientTcpConnectionActor.SignalClosureTo(Target: TProcessID);
+var
+  Closed: TMessageTuple;
+begin
+  Closed := TMessageTuple.Create(ClosedConnectionMsg, Self.PID);
+  try
+    Self.Send(Target, Closed);
+  finally
+    Closed.Free;
+  end;
+end;
+
+procedure TClientTcpConnectionActor.SignalOpeningTo(Target: TProcessID);
+begin
 end;
 
 end.
