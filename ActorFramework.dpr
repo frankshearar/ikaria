@@ -14,9 +14,11 @@ uses
   GuiTestRunner,
   ClientTcpConnectionActor in 'src\ClientTcpConnectionActor.pas',
   Ikaria in 'src\Ikaria.pas',
+  IkariaForWindows in 'src\IkariaForWindows.pas',
   PingPong in 'src\PingPong.pas' {PingPongDemo},
-  TestIkaria in 'test\TestIkaria.pas',
-  TestClientTcpConnectionActor in 'test\TestClientTcpConnectionActor.pas';
+  TestClientTcpConnectionActor in 'test\TestClientTcpConnectionActor.pas',
+  TestIkaria in 'test\TestIkaria.pas',  
+  TestIkariaForWindows in 'test\TestIkariaForWindows.pas';
 
 {$R *.res}
 

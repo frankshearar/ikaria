@@ -320,16 +320,6 @@ type
   TRootActor = class(TActor)
   end;
 
-  // I translate messages sent to me into PostMessages to a Windows message
-  // queue.
-  TWindowsMessageForwarder = class(TActor)
-  private
-    function  MatchAll(Msg: TActorMessage): Boolean;
-    procedure ForwardToMessageQueue(Msg: TActorMessage);
-  protected
-    procedure Run; override;
-  end;
-
   EActorException = class(Exception);
   ETimeout = class(Exception);
 
@@ -358,10 +348,10 @@ const
   MessageSentMsg  = 'Actor %s sent message to actor %s: %s';
 
 const
-  ExitMsg             = 'exit';
-  ExitReasonException = '%s: %s';
-  ExitReasonNormal    = 'normal';
-  ExitReasonKill      = 'kill';
+  ExitMsg                = 'exit';
+  ExitReasonException    = '%s: %s';
+  ExitReasonNormal       = 'normal';
+  ExitReasonKill         = 'kill';
 
 // String conversion
 const
@@ -1644,32 +1634,6 @@ end;
 procedure TThunkActor.Run;
 begin
   Self.Thunk;
-end;
-
-//******************************************************************************
-//* TWindowsMessageForwarder                                                   *
-//******************************************************************************
-//* TWindowsMessageForwarder Protected methods *********************************
-
-procedure TWindowsMessageForwarder.Run;
-begin
-  while not Self.Terminated do begin
-    Self.Intf.Receive(Self.MatchAll, Self.ForwardToMessageQueue);
-  end;
-end;
-
-//* TWindowsMessageForwarder Private methods ***********************************
-
-function TWindowsMessageForwarder.MatchAll(Msg: TActorMessage): Boolean;
-begin
-  Result := true;
-end;
-
-procedure TWindowsMessageForwarder.ForwardToMessageQueue(Msg: TActorMessage);
-begin
-  // * Map the Msg to a (Windows) Message;
-  // * dump the tuple into the WParam;
-  // * send to a Windows message queue.
 end;
 
 initialization
