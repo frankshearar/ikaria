@@ -133,17 +133,6 @@ type
     procedure TestIsTuple;
   end;
 
-  TestTRpcProxyTuple = class(TTestCase)
-  private
-    Src: TMessageTuple;
-    Msg: TTuple;
-  public
-    procedure SetUp; override;
-    procedure TearDown; override;
-  published
-    procedure TestOverlay;
-  end;
-
   TestTActorMailbox = class(TTestCase)
   private
     Mbox:    TActorMailbox;
@@ -351,7 +340,6 @@ begin
   Result.AddSuite(TestTProcessIDElement.Suite);
   Result.AddSuite(TestTStringElement.Suite);
   Result.AddSuite(TestTTuple.Suite);
-  Result.AddSuite(TestTRpcProxyTuple.Suite);
   Result.AddSuite(TestTActorMailbox.Suite);
   Result.AddSuite(TestTActorInterface.Suite);
   Result.AddSuite(TestTActorMessageTable.Suite);
@@ -1062,60 +1050,6 @@ end;
 procedure TestTTuple.TestIsTuple;
 begin
   Check(Self.T.IsTuple, 'Element not marked as a Tuple');
-end;
-
-//******************************************************************************
-//* TestTRpcProxyTuple                                                         *
-//******************************************************************************
-//* TestTRpcProxyTuple Public methods ******************************************
-
-procedure TestTRpcProxyTuple.SetUp;
-var
-  Params: TTuple;
-begin
-  inherited SetUp;
-
-  Self.Msg := TTuple.Create;
-  Self.Msg.AddProcessID('src-id');
-  Self.Msg.AddString('test');
-
-  Params := TTuple.Create;
-  try
-    Params.AddProcessID('target');
-    Params.Add(Self.Msg);
-
-      Self.Src := TMessageTuple.Create(RpcProxyMsg, 'event-id', Params);
-  finally
-    Params.Free;
-  end;
-end;
-
-procedure TestTRpcProxyTuple.TearDown;
-begin
-  Self.Msg.Free;
-  Self.Src.Free;
-
-  inherited TearDown;
-end;
-
-//* TestTRpcProxyTuple Published methods ***************************************
-
-procedure TestTRpcProxyTuple.TestOverlay;
-var
-  O: TRpcProxyTuple;
-  Params: TTuple;
-begin
-  Params := Self.Src[2] as TTuple;
-
-  O := TRpcProxyTuple.Overlay(Self.Src);
-  try
-    CheckEquals(RpcProxyMsg, O.MessageName, 'Message type');
-    CheckEquals(Self.Src.ReplyTo, O.ReplyTo, 'ReplyTo');
-    CheckEquals((Params[0] as TProcessIDElement).Value, O.TargetPID, 'TargetPID');
-    CheckEquals(Params[1].AsString, O.Message.AsString, 'Message');
-  finally
-    O.Free;
-  end;
 end;
 
 //******************************************************************************
