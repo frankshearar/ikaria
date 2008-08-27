@@ -199,18 +199,8 @@ end;
 //* TPingActor Private methods *************************************************
 
 function TPingActor.FindPong(Msg: TActorMessage): Boolean;
-var
-  T: TMessageTuple;
 begin
-  try
-    T := TMessageTuple.Overlay(Msg.Data);
-    try
-      Result := T.MessageName = PongName;
-    finally
-    end;
-  except
-    Result := false;
-  end;
+  Result := Self.MatchMessageName(Msg, PongName);
 end;
 
 procedure TPingActor.Ping(PID: TProcessID);
@@ -248,18 +238,8 @@ end;
 //* TPongActor Private methods *************************************************
 
 function TPongActor.FindPing(Msg: TActorMessage): Boolean;
-var
-  T: TMessageTuple;
 begin
-  try
-    T := TMessageTuple.Overlay(Msg.Data);
-    try
-      Result := T.MessageName = PingName;
-    finally
-    end;
-  except
-    Result := false;
-  end;
+  Result := Self.MatchMessageName(Msg, PingName);
 end;
 
 procedure TPongActor.Pong(PID: TProcessID);
@@ -333,9 +313,7 @@ end;
 
 function TFibonacciActor.FindNext(Msg: TActorMessage): Boolean;
 begin
-  Result := (Msg.Data.Count > 1)
-         and Msg.Data[1].IsString
-         and (TStringElement(Msg.Data[1]).Value = NextName)
+  Result := Self.MatchMessageName(Msg, NextName);
 end;
 
 procedure TFibonacciActor.ReturnNextFibonacci(Msg: TActorMessage);
