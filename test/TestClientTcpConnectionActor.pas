@@ -165,11 +165,19 @@ begin
 end;
 
 procedure TestTClientTcpConnectionActor.TestConnectSendsConnectedMessage;
+var
+  LastSentMsg: TActorMessage;
 begin
   SendActorMessage(Self.Connection, Self.ConnectTo);
 
   Self.WaitForMsg(DefaultTimeout, 'Timed out waiting for opened message');
-  CheckEquals(ConnectedMsg, (Self.LastSentMsg.Data[0] as TStringElement).Value, 'Unexpected message');
+
+  LastSentMsg := Self.CopyLastSentMsg;
+  try
+    CheckEquals(ConnectedMsg, (LastSentMsg.Data[0] as TStringElement).Value, 'Unexpected message');
+  finally
+    LastSentMsg.Free;
+  end;
 end;
 
 procedure TestTClientTcpConnectionActor.TestDoubleConnect;

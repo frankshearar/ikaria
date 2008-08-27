@@ -212,12 +212,15 @@ type
   private
     ActorExited: Boolean;
     ExitEvent:   TEvent;
-    MsgEvent:    TEvent;
-  protected
     LastSentMsg: TActorMessage;
+    MsgEvent:    TEvent;
 
     procedure NotifyOfExit(PID: String; Reason: TTuple);
     procedure StoreLastSentMessage(Sender, Target: TProcessID; Msg: TActorMessage);
+  protected
+
+    procedure CheckLastMsgEquals(Expected: TTuple; Msg: String);
+    function  CopyLastSentMsg: TActorMessage;
     procedure WaitFor(E: TEvent; Timeout: Cardinal; Msg: String);
     procedure WaitForExit(Timeout: Cardinal = 1000);
     procedure WaitForMsg(Timeout: Cardinal = 1000; OptionalMsg: String = '');
@@ -1454,20 +1457,24 @@ end;
 
 //* TActorTestCase Protected methods *******************************************
 
-procedure TActorTestCase.NotifyOfExit(PID: String; Reason: TTuple);
+procedure TActorTestCase.CheckLastMsgEquals(Expected: TTuple; Msg: String);
 begin
-  Self.ActorExited := true;
-  Self.ExitEvent.SetEvent;
+  TestLock.Acquire;
+  try
+    CheckEquals(Expected.AsString, Self.LastSentMsg.Data.AsString, Msg);
+  finally
+    TestLock.Release;
+  end;
 end;
 
-procedure TActorTestCase.StoreLastSentMessage(Sender, Target: TProcessID; Msg: TActorMessage);
+function TActorTestCase.CopyLastSentMsg: TActorMessage;
 begin
-  // StoreLastSentMessageInTestCase locks access to this method; nothing else
-  // calls it.
-
-  Self.LastSentMsg.Free;
-  Self.LastSentMsg := Msg.Copy;
-  Self.MsgEvent.SetEvent;
+  TestLock.Acquire;
+  try
+    Result := Self.LastSentMsg.Copy;
+  finally
+    TestLock.Release;
+  end;
 end;
 
 procedure TActorTestCase.WaitFor(E: TEvent; Timeout: Cardinal; Msg: String);
@@ -1490,6 +1497,24 @@ begin
     Msg := Format('%s (%s)', [Msg, OptionalMsg]);
 
   Self.WaitFor(Self.MsgEvent, Timeout, Msg);
+end;
+
+//* TActorTestCase Private methods *********************************************
+
+procedure TActorTestCase.NotifyOfExit(PID: String; Reason: TTuple);
+begin
+  Self.ActorExited := true;
+  Self.ExitEvent.SetEvent;
+end;
+
+procedure TActorTestCase.StoreLastSentMessage(Sender, Target: TProcessID; Msg: TActorMessage);
+begin
+  // StoreLastSentMessageInTestCase locks access to this method; nothing else
+  // calls it.
+
+  Self.LastSentMsg.Free;
+  Self.LastSentMsg := Msg.Copy;
+  Self.MsgEvent.SetEvent;
 end;
 
 //******************************************************************************
@@ -1540,13 +1565,7 @@ begin
     SendActorMessage(PID, Self.TestMsg);
     Self.WaitForMsg(1000);
 
-    TestLock.Acquire;
-    try
-      CheckEquals(TestMsg.AsString, Self.LastSentMsg.Data.AsString,
-                  'Echo process didn''t send a message, hence didn''t receive one');
-    finally
-      TestLock.Release;
-    end;
+    CheckLastMsgEquals(Self.TestMsg, 'Echo process didn''t send a message, hence didn''t receive one');
   finally
     Kill(PID);
   end;
