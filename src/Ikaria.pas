@@ -132,18 +132,6 @@ type
     property ReplyTo:     TProcessID read GetReplyTo;
   end;
 
-  //("rpc-proxy" {event-id} {target-id} ("proxied-msg" param1 param2))
-  TRpcProxyTuple = class(TMessageTuple)
-  private
-    function GetMessage: TTuple;
-    function GetTargetPID: TProcessID;
-  public
-    constructor Create(EventPID, TargetPID: TProcessID; Message: TTuple);
-
-    property Message:   TTuple     read GetMessage;
-    property TargetPID: TProcessID read GetTargetPID;
-  end;
-
   // I represent a message sent to an Actor.
   //
   // I will free the Data you give me.
@@ -365,7 +353,6 @@ const
   ExitReasonException = '%s: %s';
   ExitReasonNormal    = 'normal';
   ExitReasonKill      = 'kill';
-  RpcProxyMsg         = 'rpc-proxy';
 
 // String conversion
 const
@@ -971,38 +958,6 @@ end;
 function TMessageTuple.GetParameters: TTuple;
 begin
   Result := Self[2] as TTuple;
-end;
-
-//******************************************************************************
-//* TRpcProxyTuple                                                             *
-//******************************************************************************
-//* TRpcProxyTuple Public methods **********************************************
-
-constructor TRpcProxyTuple.Create(EventPID, TargetPID: TProcessID; Message: TTuple);
-var
-  Params: TTuple;
-begin
-  Params := TTuple.Create;
-  try
-    Params.AddProcessID(TargetPID);
-    Params.Add(Message);
-
-    inherited Create(RpcProxyMsg, EventPID, Params);
-  finally
-    Params.Free;
-  end;
-end;
-
-//* TRpcProxyTuple Private methods *********************************************
-
-function TRpcProxyTuple.GetMessage: TTuple;
-begin
-  Result := Self.Parameters[1] as TTuple;
-end;
-
-function TRpcProxyTuple.GetTargetPID: TProcessID;
-begin
-  Result := (Self.Parameters[0] as TProcessIDElement).Value;
 end;
 
 //******************************************************************************
