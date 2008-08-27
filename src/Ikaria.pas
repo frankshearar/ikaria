@@ -279,6 +279,9 @@ type
 
   // I represent an execution context. I send and receive messages to and from
   // other Actors.
+  //
+  // Also, I provide common matching functions - MatchAny, MatchMessageName,
+  // etc. - to my subclasses. 
   TActor = class(TThread)
   private
     function  GetPID: TProcessID;
@@ -291,6 +294,7 @@ type
 
     procedure Execute; override;
     function  FindKill(Msg: TActorMessage): Boolean;
+    function  MatchAny(Msg: TActorMessage): Boolean;
     function  MatchMessageName(Msg: TActorMessage; MsgName: String): Boolean;
     procedure RegisterActions(Table: TActorMessageTable); virtual;
     procedure Run; virtual;
@@ -1531,6 +1535,11 @@ begin
            and Msg.Data[1].IsString
            and (TStringElement(Msg.Data[1]).Value = ExitReasonKill);
   end;
+end;
+
+function TActor.MatchAny(Msg: TActorMessage): Boolean;
+begin
+  Result := true;
 end;
 
 function TActor.MatchMessageName(Msg: TActorMessage; MsgName: String): Boolean;

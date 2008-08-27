@@ -18,7 +18,6 @@ type
   private
     TargetHandle: HWND;
 
-    function  MatchAny(Msg: TActorMessage): Boolean;
     function  MatchMessageQueueHandle(Msg: TActorMessage): Boolean;
     procedure ForwardToMessageQueue(Msg: TActorMessage);
     procedure SetMessageQueueHandle(Msg: TActorMessage);
@@ -44,11 +43,6 @@ begin
 end;
 
 //* TWindowsMessageForwarder Private methods ***********************************
-
-function TWindowsMessageForwarder.MatchAny(Msg: TActorMessage): Boolean;
-begin
-  Result := true;
-end;
 
 function TWindowsMessageForwarder.MatchMessageQueueHandle(Msg: TActorMessage): Boolean;
 begin
