@@ -287,6 +287,7 @@ type
     function  GetPID: TProcessID;
     procedure ReactToKill(Msg: TActorMessage);
     procedure RegisterRequiredActions(Table: TActorMessageTable);
+    procedure SendExit(Reason: TTuple);
   protected
     Intf:     TActorInterface;
     MsgTable: TActorMessageTable;
@@ -1571,39 +1572,27 @@ end;
 
 procedure TActor.SendExceptionalExit(E: Exception);
 var
-  BadExit: TTuple;
+  Reason:  TTuple;
 begin
-  BadExit := TTuple.Create;
+  Reason := TTuple.Create;
   try
-    BadExit.AddProcessID(Self.PID);
-    BadExit.AddString(ExitMsg);
-    BadExit.AddString(Format(ExitReasonException, [E.ClassName, E.Message]));
-
-    // Send to everyone in the link set!
-
-
-    NotifyOfActorExit(Self.PID, BadExit);
+    Reason.AddString(Format(ExitReasonException, [E.ClassName, E.Message]));
+    Self.SendExit(Reason);
   finally
-    BadExit.Free;
+    Reason.Free;
   end;
 end;
 
 procedure TActor.SendNormalExit;
 var
-  NormalExit: TTuple;
+  Reason: TTuple;
 begin
-  NormalExit := TTuple.Create;
+  Reason := TTuple.Create;
   try
-    NormalExit.AddProcessID(Self.PID);
-    NormalExit.AddString(ExitMsg);
-    NormalExit.AddString(ExitReasonNormal);
-
-    // Send to everyone in the link set!
-
-
-    NotifyOfActorExit(Self.PID, NormalExit);
+    Reason.AddString(ExitReasonNormal);
+    Self.SendExit(Reason);
   finally
-    NormalExit.Free;
+    Reason.Free;
   end;
 end;
 
@@ -1633,6 +1622,20 @@ end;
 procedure TActor.RegisterRequiredActions(Table: TActorMessageTable);
 begin
   Table.Add(Self.FindKill, Self.ReactToKill);
+end;
+
+procedure TActor.SendExit(Reason: TTuple);
+var
+  Exit: TTuple;
+begin
+  Exit := TMessageTuple.Create(ExitMsg, Self.PID, Reason);
+  try
+    // Send to everyone in the link set!
+
+    NotifyOfActorExit(Self.PID, Exit);
+  finally
+    Exit.Free;
+  end;
 end;
 
 //******************************************************************************
