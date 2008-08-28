@@ -172,6 +172,7 @@ type
     fOnMessageArrived: TNotifyEvent;
     fPID:              TProcessID;
     Lock:              TCriticalSection;
+    LinkSet:           TStringList;
     Messages:          TObjectList;
     SaveQueue:         TObjectList;
 
@@ -191,6 +192,7 @@ type
     function  FindAndProcessMessage(Table: TActorMessageTable;
                                     var ConditionIndex: Integer): TActorMessage;
     function  FindMessage(Condition: TMessageFinder): TActorMessage;
+    procedure Link(PID: TProcessID);
     procedure Purge;
     procedure Timeout;
 
@@ -240,24 +242,32 @@ type
 
     function  GetPID: TProcessID;
     procedure NewMessageArrived(Sender: TObject);
-    function  WaitForMessage: Boolean;
+    procedure NullThunk;
+    function  WaitForMessage(Timeout: Cardinal): Boolean;
   public
     constructor Create;
     destructor  Destroy; override;
 
+    procedure Link(PID: TProcessID);
     procedure Receive(Matching: TMessageFinder;
                       Action: TActOnMessage); overload;
+    procedure Receive(Matching: TMessageFinder;
+                      Action: TActOnMessage;
+                      Timeout: Cardinal); overload;
     procedure Receive(Matching: TMessageFinder;
                       Action: TActOnMessage;
                       Timeout: Cardinal;
                       TimeoutAction: TThunk); overload;
     procedure Receive(Table: TActorMessageTable); overload;
     procedure Receive(Table: TActorMessageTable;
+                      Timeout: Cardinal); overload;
+    procedure Receive(Table: TActorMessageTable;
                       Timeout: Cardinal;
                       TimeoutAction: TThunk); overload;
     procedure Send(Target: TProcessID; MsgName: String); overload;
     procedure Send(Target: TProcessID; MsgName: String; Parameters: TTuple); overload;
     procedure Send(Target: TProcessID; T: TTuple); overload;
+    function  SpawnLink(ActorType: TActorClass): TProcessID;
 
     property PID:        TProcessID read GetPID;
     property Terminated: Boolean    read fTerminated write fTerminated;
@@ -302,6 +312,7 @@ type
     procedure SendExceptionalExit(E: Exception);
     procedure SendNormalExit;
     function  Spawn(ActorType: TActorClass): TProcessID;
+    function  SpawnLink(ActorType: TActorClass): TProcessID;
   public
     class function RootActor: TProcessID;
 
@@ -451,15 +462,54 @@ begin
   end;
 end;
 
-procedure PrimitiveReceive(Mailbox: TActorMailbox; Table: TActorMessageTable);
+function Whois(PID: TProcessID): TActorMailbox;
+var
+  Index: Integer;
+begin
+  // Return a pointer to the actor known by PID, or return nil if no such actor
+  // exists.
+  //
+  // PRECONDITION: You've acquired ActorLock!
+  Result := nil;
+
+  Index := Actors.IndexOf(PID);
+
+  if (Index <> -1) then
+    Result := Actors.Objects[Index] as TActorMailbox;
+end;
+
+procedure PrimitiveLink(LinkingPID, LinkedPID: TProcessID);
+var
+  A, B: TActorMailbox;
+begin
+  ActorLock.Acquire;
+  try
+    A := Whois(LinkingPID);
+    B := Whois(LinkedPID);
+
+    if Assigned(A) and Assigned(B) then begin
+      A.LinkSet.Add(B.PID);
+      B.LinkSet.Add(A.PID);
+    end;
+  finally
+    ActorLock.Release;
+  end;
+end;
+
+function PrimitiveReceive(Mailbox: TActorMailbox; Table: TActorMessageTable): Boolean;
 var
   I:   Integer;
   Msg: TActorMessage;
 begin
+  // Return true iff we receive a message matching one of Table's conditions.
+  Result := false;
+
   Msg := Mailbox.FindAndProcessMessage(Table, I);
   try
-    if Assigned(Msg) then
+    if Assigned(Msg) then begin
+      Result := true;
       Table.Actions[I](Msg);
+    end;
   finally
     Msg.Free;
   end;
@@ -480,14 +530,14 @@ end;
 procedure PrimitiveSend(Sender, Target: TProcessID; Msg: TTuple);
   procedure DeliverMsg(Target: TProcessID; Msg: TActorMessage);
   var
-    Index: Integer;
+    TargetMbox: TActorMailbox;
   begin
     ActorLock.Acquire;
     try
-      Index := Actors.IndexOf(Target);
+      TargetMbox := Whois(Target);
 
-      if (Index <> -1) then
-        (Actors.Objects[Index] as TActorMailbox).AddMessage(Msg);
+      if Assigned(TargetMbox) then
+        TargetMbox.AddMessage(Msg);
     finally
       ActorLock.Release;
     end;
@@ -1010,6 +1060,10 @@ constructor TActorMailbox.Create;
 begin
   inherited Create;
 
+  Self.LinkSet := TStringList.Create;
+  Self.LinkSet.Duplicates := dupIgnore;
+  Self.LinkSet.Sorted     := true;
+
   Self.Lock      := TCriticalSection.Create;
   Self.Messages  := TObjectList.Create(false);
   Self.SaveQueue := TObjectList.Create(false);
@@ -1025,6 +1079,7 @@ begin
     Self.Purge;
     Self.SaveQueue.Free;
     Self.Messages.Free;
+    Self.LinkSet.Free;
   finally
     Self.Lock.Release;
   end;
@@ -1128,6 +1183,11 @@ begin
   finally
     Self.Lock.Release;
   end;
+end;
+
+procedure TActorMailbox.Link(PID: TProcessID);
+begin
+  PrimitiveLink(Self.PID, PID);
 end;
 
 procedure TActorMailbox.Purge;
@@ -1289,6 +1349,11 @@ begin
   inherited Destroy;
 end;
 
+procedure TActorInterface.Link(PID: TProcessID);
+begin
+  Self.Mailbox.Link(PID);
+end;
+
 procedure TActorInterface.Receive(Matching: TMessageFinder;
                                   Action: TActOnMessage);
 var
@@ -1301,6 +1366,13 @@ begin
   finally
     T.Free;
   end;
+end;
+
+procedure TActorInterface.Receive(Matching: TMessageFinder;
+                                  Action: TActOnMessage;
+                                  Timeout: Cardinal);
+begin
+  Self.Receive(Matching, Action, Timeout, Self.NullThunk);
 end;
 
 procedure TActorInterface.Receive(Matching: TMessageFinder;
@@ -1325,11 +1397,17 @@ begin
   // message matching a condition in Table.
 
   while not Self.Terminated do begin
-    if Self.WaitForMessage then begin
+    if Self.WaitForMessage(OneSecond) then begin
       PrimitiveReceive(Self.Mailbox, Table);
       Break;
     end;
   end;
+end;
+
+procedure TActorInterface.Receive(Table: TActorMessageTable;
+                                  Timeout: Cardinal);
+begin
+  Self.Receive(Table, Timeout, Self.NullThunk);
 end;
 
 procedure TActorInterface.Receive(Table: TActorMessageTable;
@@ -1347,10 +1425,9 @@ begin
   Finished := false;
 
   while not Self.Terminated and (Now < EndTime) do begin
-    if Self.WaitForMessage then begin
-      PrimitiveReceive(Self.Mailbox, Table);
-      Finished := true;
-      Break;
+    if Self.WaitForMessage(OneSecond) then begin
+      Finished := PrimitiveReceive(Self.Mailbox, Table);
+      if Finished then Break;
     end;
   end;
 
@@ -1386,6 +1463,18 @@ begin
   PrimitiveSend(Self.Mailbox.PID, Target, T);
 end;
 
+function TActorInterface.SpawnLink(ActorType: TActorClass): TProcessID;
+var
+  A: TActor;
+begin
+  A := ActorType.Create(Self.PID);
+  Self.Link(A.PID);
+
+  Result := A.PID;
+
+  A.Resume;
+end;
+
 //* TActorInterface Private methods ********************************************
 
 function TActorInterface.GetPID: TProcessID;
@@ -1402,7 +1491,11 @@ begin
   Self.MsgEvent.SetEvent;
 end;
 
-function TActorInterface.WaitForMessage: Boolean;
+procedure TActorInterface.NullThunk;
+begin
+end;
+
+function TActorInterface.WaitForMessage(Timeout: Cardinal): Boolean;
   procedure Fail(Reason: String);
   const
     ErrorMsg = 'Unexpected result waiting for response: %s';
@@ -1418,7 +1511,7 @@ begin
   Result := false;
   ErrorMsg := 'Unexpected result waiting for response: %s';
 
-  case Self.MsgEvent.WaitFor(OneSecond) of
+  case Self.MsgEvent.WaitFor(Timeout) of
     wrSignaled:  Result := true;
     wrTimeout:   ; // Just keep waiting
     wrError:     Fail(SysErrorMessage(Self.MsgEvent.LastError));
@@ -1583,7 +1676,7 @@ begin
   end;
 end;
 
-procedure TActor.SendNormalExit;
+    procedure TActor.SendNormalExit;
 var
   Reason: TTuple;
 begin
@@ -1607,6 +1700,11 @@ begin
   A.Resume;
 end;
 
+function TActor.SpawnLink(ActorType: TActorClass): TProcessID;
+begin
+  Result := Self.Intf.SpawnLink(ActorType);
+end;
+
 //* TActor Private methods *****************************************************
 
 function TActor.GetPID: TProcessID;
@@ -1627,10 +1725,12 @@ end;
 procedure TActor.SendExit(Reason: TTuple);
 var
   Exit: TTuple;
+  I:    Integer;
 begin
   Exit := TMessageTuple.Create(ExitMsg, Self.PID, Reason);
   try
-    // Send to everyone in the link set!
+    for I := 0 to Self.Intf.Mailbox.LinkSet.Count - 1 do
+      Self.Intf.Send(Self.Intf.Mailbox.LinkSet[I], ExitMsg, Reason);
 
     NotifyOfActorExit(Self.PID, Exit);
   finally

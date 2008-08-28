@@ -170,13 +170,16 @@ type
 
   TestTActorInterface = class(TTestCase)
   private
+    BarName:      String;
     FooName:      String;
     Intf:         TActorInterface;
     ReceivedAFoo: Boolean;
     TimedOut:     Boolean;
 
     procedure ActOnFooMsg(Msg: TActorMessage);
+    function  CreateBarMsg: TTuple;
     function  CreateFooMsg: TTuple;
+    function  CreateMsgNamed(Name: String): TTuple;
     function  RecogniseFooMsg(Msg: TActorMessage): Boolean;
     procedure Timeout;
   public
@@ -184,7 +187,9 @@ type
     procedure TearDown; override;
   published
     procedure TestReceive;
+    procedure TestReceiveReturnsOnlyOnAMatch;
     procedure TestReceiveWithTimeout;
+    procedure TestReceiveWithZeroTimeout;
   end;
 
   TestTActorMessageTable = class(TTestCase)
@@ -231,13 +236,20 @@ type
 
   TestTActor = class(TActorTestCase)
   private
-    E:           TEvent;
-    TestMsg:     TTuple;
+    E:         TEvent;
+    ExitRecvd: Boolean;
+    TestMsg:   TTuple;
+    TimedOut:  Boolean;
+
+    function  MatchExit(Msg: TActorMessage): Boolean;
+    procedure RecordExit(Msg: TActorMessage);
+    procedure Timeout;
   public
     procedure SetUp; override;
     procedure TearDown; override;
   published
     procedure TestActorAcceptsKillMessage;
+    procedure TestActorNotifiesLinkSetOfExit;
     procedure TestActorsCanReceiveMessages;
   end;
 
@@ -258,7 +270,8 @@ type
   end;
 
 const
-  TestName = 'test';
+  TenthOfASecond = 100;
+  TestName       = 'test';
 
 implementation
 
@@ -1245,6 +1258,7 @@ procedure TestTActorInterface.SetUp;
 begin
   inherited SetUp;
 
+  Self.BarName := 'Bar';
   Self.FooName := 'Foo';
   Self.Intf    := TActorInterface.Create;
 
@@ -1267,11 +1281,21 @@ begin
   Self.ReceivedAFoo := true;
 end;
 
+function TestTActorInterface.CreateBarMsg: TTuple;
+begin
+  Result := Self.CreateMsgNamed(Self.BarName);
+end;
+
 function TestTActorInterface.CreateFooMsg: TTuple;
+begin
+  Result := Self.CreateMsgNamed(Self.FooName);
+end;
+
+function TestTActorInterface.CreateMsgNamed(Name: String): TTuple;
 var
   M: TMessageTuple;
 begin
-  M := TMessageTuple.Create(FooName, Self.Intf.PID);
+  M := TMessageTuple.Create(Name, Self.Intf.PID);
   Result := M;
 end;
 
@@ -1314,7 +1338,32 @@ begin
   Check(Self.ReceivedAFoo, 'Didn''t receive a message');
 end;
 
+procedure TestTActorInterface.TestReceiveReturnsOnlyOnAMatch;
+var
+  Bar: TTuple;
+begin
+  Bar := Self.CreateBarMsg;
+  try
+    SendActorMessage(Self.Intf.PID, Bar);
+  finally
+    Bar.Free;
+  end;
+
+  Self.Intf.Receive(Self.RecogniseFooMsg, Self.ActOnFooMsg, TenthOfASecond, Self.Timeout);
+
+  Check(not Self.ReceivedAFoo, 'Received a message');
+  Check(Self.TimedOut,         'Didn''t time out waiting for a particular message');
+end;
+
 procedure TestTActorInterface.TestReceiveWithTimeout;
+begin
+  Self.Intf.Receive(Self.RecogniseFooMsg, Self.ActOnFooMsg, TenthOfASecond, Self.Timeout);
+
+  Check(not Self.ReceivedAFoo, 'Received a message');
+  Check(Self.TimedOut,         'Timeout action not invoked');
+end;
+
+procedure TestTActorInterface.TestReceiveWithZeroTimeout;
 var
   Foo: TTuple;
 begin
@@ -1329,7 +1378,7 @@ begin
 
   Check(not Self.ReceivedAFoo, 'Received a message');
   Check(Self.TimedOut,         'Timeout action not invoked');
-end;  
+end;
 
 //******************************************************************************
 //* TestTActorMessageTable                                                     *
@@ -1530,9 +1579,10 @@ begin
 
   Self.E := TSimpleEvent.Create;
 
-  Self.TestMsg := TTuple.Create;
-  Self.TestMsg.AddProcessID('');
-  Self.TestMsg.AddString(TestName);
+  Self.TestMsg := TMessageTuple.Create(TestName, '');
+
+  Self.ExitRecvd := false;
+  Self.TimedOut  := false;
 end;
 
 procedure TestTActor.TearDown;
@@ -1541,6 +1591,34 @@ begin
   Self.E.Free;
 
   inherited TearDown;
+end;
+
+//* TestTActor Private methods *************************************************
+
+function TestTActor.MatchExit(Msg: TActorMessage): Boolean;
+var
+  O: TMessageTuple;
+begin
+  try
+    O := TMessageTuple.Overlay(Msg.Data);
+    try
+      Result := O.MessageName = ExitMsg;
+    finally
+      O.Free;
+    end;
+  except
+    Result := false;
+  end;
+end;
+
+procedure TestTActor.RecordExit(Msg: TActorMessage);
+begin
+  Self.ExitRecvd := true;
+end;
+
+procedure TestTActor.Timeout;
+begin
+  Self.TimedOut := true;
 end;
 
 //* TestTActor Published methods ***********************************************
@@ -1554,6 +1632,22 @@ begin
 
   Self.WaitForExit;
   Check(Self.ActorExited, 'Actor didn''t exit, so didn''t accept the kill');
+end;
+
+procedure TestTActor.TestActorNotifiesLinkSetOfExit;
+var
+  I: TActorInterface;
+begin
+  I := TActorInterface.Create;
+  try
+    I.SpawnLink(TSingleShotActor);
+
+    I.Receive(Self.MatchExit, Self.RecordExit, OneSecond, Self.Timeout);
+    Check(not Self.TimedOut, 'Timed out waiting for message');
+    Check(Self.ExitRecvd, Format('No %s message received', [ExitMsg]));
+  finally
+    I.Free;
+  end;
 end;
 
 procedure TestTActor.TestActorsCanReceiveMessages;
