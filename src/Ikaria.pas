@@ -281,7 +281,7 @@ type
   // other Actors.
   //
   // Also, I provide common matching functions - MatchAny, MatchMessageName,
-  // etc. - to my subclasses. 
+  // etc. - to my subclasses.
   TActor = class(TThread)
   private
     function  GetPID: TProcessID;
