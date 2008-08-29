@@ -11,9 +11,11 @@ unit Ikaria;
 
 
 // TODO:
-// * function TActor.SpawnLink(Actor: TActor): TProcessID;
-// * Propogating exits to the link set of an Actor
+// * Terminating whenever an exit is received
 // * Trapping of exits (when a flag is set)
+// * Should receiving exits be pushed into the primitive layer? Right now it's
+//   possible to have a badly- or maliciously-written Actor refuse to terminate
+//   because it never processes an exit message.
 // * Parallel map: take an array and a function to be applied to each element in
 //   the array, and fork/join the processing, a la mapreduce.
 // * "Futures"?
