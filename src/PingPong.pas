@@ -165,7 +165,7 @@ begin
 
     Next := RPC(Self.NextFibber, AskForNext, 100000);
     try
-      LogToDemo('', Format('Next Fibonacci: %d', [TIntegerElement(Next[0]).Value]), 0, '', LevelInfo, 0, '');
+      LogToDemo('', Format('Next Fibonacci: %d', [TIntegerTerm(Next[0]).Value]), 0, '', LevelInfo, 0, '');
     finally
       Next.Free;
     end;
@@ -323,7 +323,7 @@ begin
   Answer := TTuple.Create;
   try
     Answer.AddInteger(Self.FibGen.Next);
-    Self.Intf.Send(TProcessIDElement(Msg.Data[0]).Value, Answer);
+    Self.Intf.Send(TProcessIDTerm(Msg.Data[0]).Value, Answer);
   finally
     Answer.Free;
   end;

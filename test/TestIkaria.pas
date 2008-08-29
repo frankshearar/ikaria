@@ -41,9 +41,9 @@ type
     property EventRef: Cardinal  read fEventRef;
   end;
 
-  TestTBooleanElement = class(TTestCase)
+  TestTBooleanTerm = class(TTestCase)
   private
-    B: TBooleanElement;
+    B: TBooleanTerm;
   public
     procedure SetUp; override;
     procedure TearDown; override;
@@ -59,9 +59,9 @@ type
     procedure TestValue;
   end;
 
-  TestTIntegerElement = class(TTestCase)
+  TestTIntegerTerm = class(TTestCase)
   private
-    I: TIntegerElement;
+    I: TIntegerTerm;
   public
     procedure SetUp; override;
     procedure TearDown; override;
@@ -77,9 +77,9 @@ type
     procedure TestValue;
   end;
 
-  TestTProcessIDElement = class(TTestCase)
+  TestTProcessIDTerm = class(TTestCase)
   private
-    PID: TProcessIDElement;
+    PID: TProcessIDTerm;
   public
     procedure SetUp; override;
     procedure TearDown; override;
@@ -95,9 +95,9 @@ type
     procedure TestValue;
   end;
 
-  TestTStringElement = class(TTestCase)
+  TestTStringTerm = class(TTestCase)
   private
-    S: TStringElement;
+    S: TStringTerm;
   public
     procedure SetUp; override;
     procedure TearDown; override;
@@ -371,10 +371,10 @@ end;
 function Suite: ITestSuite;
 begin
   Result := TTestSuite.Create('Ikaria unit tests');
-  Result.AddSuite(TestTBooleanElement.Suite);
-  Result.AddSuite(TestTIntegerElement.Suite);
-  Result.AddSuite(TestTProcessIDElement.Suite);
-  Result.AddSuite(TestTStringElement.Suite);
+  Result.AddSuite(TestTBooleanTerm.Suite);
+  Result.AddSuite(TestTIntegerTerm.Suite);
+  Result.AddSuite(TestTProcessIDTerm.Suite);
+  Result.AddSuite(TestTStringTerm.Suite);
   Result.AddSuite(TestTTuple.Suite);
   Result.AddSuite(TestTActorMailbox.Suite);
   Result.AddSuite(TestTActorInterface.Suite);
@@ -404,7 +404,7 @@ end;
 
 procedure TEchoActor.EchoMessage(Msg: TActorMessage);
 begin
-  Self.Intf.Send(TProcessIDElement(Msg.Data[1]).Value, Msg.Data);
+  Self.Intf.Send(TProcessIDTerm(Msg.Data[1]).Value, Msg.Data);
 end;
 
 //******************************************************************************
@@ -469,36 +469,36 @@ begin
 end;
 
 //******************************************************************************
-//* TestTBooleanElement                                                        *
+//* TestTBooleanTerm                                                           *
 //******************************************************************************
-//* TestTBooleanElement Public methods *****************************************
+//* TestTBooleanTerm Public methods ********************************************
 
-procedure TestTBooleanElement.SetUp;
+procedure TestTBooleanTerm.SetUp;
 begin
   inherited SetUp;
 
-  Self.B := TBooleanElement.Create(true);
+  Self.B := TBooleanTerm.Create(true);
 end;
 
-procedure TestTBooleanElement.TearDown;
+procedure TestTBooleanTerm.TearDown;
 begin
   Self.B.Free;
 
   inherited TearDown;
 end;
 
-//* TestTBooleanElement Published methods **************************************
+//* TestTBooleanTerm Published methods *****************************************
 
-procedure TestTBooleanElement.TestAsString;
+procedure TestTBooleanTerm.TestAsString;
 begin
   CheckEquals(BoolStrs[Self.B.Value], Self.B.AsString, 'BooleanElement.AsString');
 end;
 
-procedure TestTBooleanElement.TestCopy;
+procedure TestTBooleanTerm.TestCopy;
 var
-  C: TBooleanElement;
+  C: TBooleanTerm;
 begin
-  C := Self.B.Copy as TBooleanElement;
+  C := Self.B.Copy as TBooleanTerm;
   try
     CheckEquals(Self.B.Value, C.Value, 'Value not set');
   finally
@@ -506,12 +506,12 @@ begin
   end;
 end;
 
-procedure TestTBooleanElement.TestEquals;
+procedure TestTBooleanTerm.TestEquals;
 var
-  Same:    TBooleanElement;
-  Negated: TBooleanElement;
+  Same:    TBooleanTerm;
+  Negated: TBooleanTerm;
 begin
-  Same := TBooleanElement.Create(Self.B.Value);
+  Same := TBooleanTerm.Create(Self.B.Value);
   try
     Check(Same.Equals(Self.B), 'Same <> B');
     Check(Self.B.Equals(Same), 'B <> Same');
@@ -519,7 +519,7 @@ begin
     Same.Free;
   end;
 
-  Negated := TBooleanElement.Create(not Self.B.Value);
+  Negated := TBooleanTerm.Create(not Self.B.Value);
   try
     Check(not Negated.Equals(Self.B), 'Negated = B');
     Check(not Self.B.Equals(Negated), 'B = Negated');
@@ -528,67 +528,67 @@ begin
   end;
 end;
 
-procedure TestTBooleanElement.TestIsBoolean;
+procedure TestTBooleanTerm.TestIsBoolean;
 begin
   Check(Self.B.IsBoolean, 'Element not marked as a Boolean');
 end;
 
-procedure TestTBooleanElement.TestIsInteger;
+procedure TestTBooleanTerm.TestIsInteger;
 begin
   Check(not Self.B.IsInteger, 'Element marked as an Integer');
 end;
 
-procedure TestTBooleanElement.TestIsProcessID;
+procedure TestTBooleanTerm.TestIsProcessID;
 begin
   Check(not Self.B.IsProcessID, 'Element marked as a ProcessID');
 end;
 
-procedure TestTBooleanElement.TestIsString;
+procedure TestTBooleanTerm.TestIsString;
 begin
   Check(not Self.B.IsString, 'Element marked as a String');
 end;
 
-procedure TestTBooleanElement.TestIsTuple;
+procedure TestTBooleanTerm.TestIsTuple;
 begin
   Check(not Self.B.IsTuple, 'Element marked as a Tuple');
 end;
 
-procedure TestTBooleanElement.TestValue;
+procedure TestTBooleanTerm.TestValue;
 begin
   CheckEquals(true, Self.B.Value, 'Value not set in constructor');
 end;
 
 //******************************************************************************
-//* TestTIntegerElement                                                        *
+//* TestTIntegerTerm                                                           *
 //******************************************************************************
-//* TestTIntegerElement Public methods *****************************************
+//* TestTIntegerTerm Public methods ********************************************
 
-procedure TestTIntegerElement.SetUp;
+procedure TestTIntegerTerm.SetUp;
 begin
   inherited SetUp;
 
-  Self.I := TIntegerElement.Create(42);
+  Self.I := TIntegerTerm.Create(42);
 end;
 
-procedure TestTIntegerElement.TearDown;
+procedure TestTIntegerTerm.TearDown;
 begin
   Self.I.Free;
 
   inherited TearDown;
 end;
 
-//* TestTIntegerElement Published methods **************************************
+//* TestTIntegerTerm Published methods *****************************************
 
-procedure TestTIntegerElement.TestAsString;
+procedure TestTIntegerTerm.TestAsString;
 begin
   CheckEquals(IntToStr(Self.I.Value), Self.I.AsString, 'IntegerElement.AsString');
 end;
 
-procedure TestTIntegerElement.TestCopy;
+procedure TestTIntegerTerm.TestCopy;
 var
-  C: TIntegerElement;
+  C: TIntegerTerm;
 begin
-  C := Self.I.Copy as TIntegerElement;
+  C := Self.I.Copy as TIntegerTerm;
   try
     CheckEquals(Self.I.Value, C.Value, 'Value not set');
   finally
@@ -596,12 +596,12 @@ begin
   end;
 end;
 
-procedure TestTIntegerElement.TestEquals;
+procedure TestTIntegerTerm.TestEquals;
 var
-  Same: TIntegerElement;
-  Succ: TIntegerElement;
+  Same: TIntegerTerm;
+  Succ: TIntegerTerm;
 begin
-  Same := TIntegerElement.Create(Self.I.Value);
+  Same := TIntegerTerm.Create(Self.I.Value);
   try
     Check(Same.Equals(Self.I), 'Same <> I');
     Check(Self.I.Equals(Same), 'I <> Same');
@@ -609,7 +609,7 @@ begin
     Same.Free;
   end;
 
-  Succ := TIntegerElement.Create(Self.I.Value + 1);
+  Succ := TIntegerTerm.Create(Self.I.Value + 1);
   try
     Check(not Succ.Equals(Self.I), 'Succ = I');
     Check(not Self.I.Equals(Succ), 'I = Succ');
@@ -618,67 +618,67 @@ begin
   end;
 end;
 
-procedure TestTIntegerElement.TestIsBoolean;
+procedure TestTIntegerTerm.TestIsBoolean;
 begin
   Check(not Self.I.IsBoolean, 'Element marked as a Boolean');
 end;
 
-procedure TestTIntegerElement.TestIsInteger;
+procedure TestTIntegerTerm.TestIsInteger;
 begin
   Check(Self.I.IsInteger, 'Element not marked as an Integer');
 end;
 
-procedure TestTIntegerElement.TestIsProcessID;
+procedure TestTIntegerTerm.TestIsProcessID;
 begin
   Check(not Self.I.IsProcessID, 'Element marked as a ProcessID');
 end;
 
-procedure TestTIntegerElement.TestIsString;
+procedure TestTIntegerTerm.TestIsString;
 begin
   Check(not Self.I.IsString, 'Element marked as a String');
 end;
 
-procedure TestTIntegerElement.TestIsTuple;
+procedure TestTIntegerTerm.TestIsTuple;
 begin
   Check(not Self.I.IsTuple, 'Element marked as a Tuple');
 end;
 
-procedure TestTIntegerElement.TestValue;
+procedure TestTIntegerTerm.TestValue;
 begin
   CheckEquals(42, Self.I.Value, 'Value not set in constructor');
 end;
 
 //******************************************************************************
-//* TestTProcessIDElement                                                      *
+//* TestTProcessIDTerm                                                         *
 //******************************************************************************
-//* TestTProcessIDElement Public methods ***************************************
+//* TestTProcessIDTerm Public methods ******************************************
 
-procedure TestTProcessIDElement.SetUp;
+procedure TestTProcessIDTerm.SetUp;
 begin
   inherited SetUp;
 
-  Self.PID := TProcessIDElement.Create('ce39596d-ae9f-442a-8d06-33608840bb96');
+  Self.PID := TProcessIDTerm.Create('ce39596d-ae9f-442a-8d06-33608840bb96');
 end;
 
-procedure TestTProcessIDElement.TearDown;
+procedure TestTProcessIDTerm.TearDown;
 begin
   Self.PID.Free;
 
   inherited TearDown;
 end;
 
-//* TestTProcessIDElement Published methods ************************************
+//* TestTProcessIDTerm Published methods ***************************************
 
-procedure TestTProcessIDElement.TestAsString;
+procedure TestTProcessIDTerm.TestAsString;
 begin
   CheckEquals(Format('{%s}', [Self.PID.Value]), Self.PID.AsString, 'ProcessIDElement.AsString');
 end;
 
-procedure TestTProcessIDElement.TestCopy;
+procedure TestTProcessIDTerm.TestCopy;
 var
-  C: TProcessIDElement;
+  C: TProcessIDTerm;
 begin
-  C := Self.PID.Copy as TProcessIDElement;
+  C := Self.PID.Copy as TProcessIDTerm;
   try
     CheckEquals(Self.PID.Value, C.Value, 'Value not set');
   finally
@@ -686,12 +686,12 @@ begin
   end;
 end;
 
-procedure TestTProcessIDElement.TestEquals;
+procedure TestTProcessIDTerm.TestEquals;
 var
-  Other: TProcessIDElement;
-  Same:  TProcessIDElement;
+  Other: TProcessIDTerm;
+  Same:  TProcessIDTerm;
 begin
-  Other := TProcessIDElement.Create(Self.PID.Value + '1');
+  Other := TProcessIDTerm.Create(Self.PID.Value + '1');
   try
     Check(not Other.Equals(Self.PID), 'Other = PID');
     Check(not Self.PID.Equals(Other), 'PID = Other');
@@ -699,7 +699,7 @@ begin
     Other.Free;
   end;
 
-  Same := TProcessIDElement.Create(Self.PID.Value);
+  Same := TProcessIDTerm.Create(Self.PID.Value);
   try
     Check(Same.Equals(Self.PID), 'Same <> PID');
     Check(Self.PID.Equals(Same), 'PID <> Same');
@@ -708,67 +708,67 @@ begin
   end;
 end;
 
-procedure TestTProcessIDElement.TestIsBoolean;
+procedure TestTProcessIDTerm.TestIsBoolean;
 begin
   Check(not Self.PID.IsBoolean, 'Element marked as a Boolean');
 end;
 
-procedure TestTProcessIDElement.TestIsInteger;
+procedure TestTProcessIDTerm.TestIsInteger;
 begin
   Check(not Self.PID.IsInteger, 'Element marked as an Integer');
 end;
 
-procedure TestTProcessIDElement.TestIsProcessID;
+procedure TestTProcessIDTerm.TestIsProcessID;
 begin
   Check(Self.PID.IsProcessID, 'Element not marked as a ProcessID');
 end;
 
-procedure TestTProcessIDElement.TestIsString;
+procedure TestTProcessIDTerm.TestIsString;
 begin
   Check(not Self.PID.IsString, 'Element marked as a String');
 end;
 
-procedure TestTProcessIDElement.TestIsTuple;
+procedure TestTProcessIDTerm.TestIsTuple;
 begin
   Check(not Self.PID.IsTuple, 'Element marked as a Tuple');
 end;
 
-procedure TestTProcessIDElement.TestValue;
+procedure TestTProcessIDTerm.TestValue;
 begin
   CheckEquals('ce39596d-ae9f-442a-8d06-33608840bb96', Self.PID.Value, 'Value not set in constructor');
 end;
 
 //******************************************************************************
-//* TestTStringElement                                                         *
+//* TestTStringTerm                                                            *
 //******************************************************************************
-//* TestTStringElement Public methods ******************************************
+//* TestTStringTerm Public methods *********************************************
 
-procedure TestTStringElement.SetUp;
+procedure TestTStringTerm.SetUp;
 begin
   inherited SetUp;
 
-  Self.S := TStringElement.Create('hello');
+  Self.S := TStringTerm.Create('hello');
 end;
 
-procedure TestTStringElement.TearDown;
+procedure TestTStringTerm.TearDown;
 begin
   Self.S.Free;
 
   inherited TearDown;
 end;
 
-//* TestTStringElement Published methods ***************************************
+//* TestTStringTerm Published methods ******************************************
 
-procedure TestTStringElement.TestAsString;
+procedure TestTStringTerm.TestAsString;
 begin
   CheckEquals(Format('"%s"', [Self.S.Value]), Self.S.AsString, 'StringElement.AsString');
 end;
 
-procedure TestTStringElement.TestCopy;
+procedure TestTStringTerm.TestCopy;
 var
-  C: TStringElement;
+  C: TStringTerm;
 begin
-  C := Self.S.Copy as TStringElement;
+  C := Self.S.Copy as TStringTerm;
   try
     CheckEquals(Self.S.Value, C.Value, 'Value not set');
   finally
@@ -776,12 +776,12 @@ begin
   end;
 end;
 
-procedure TestTStringElement.TestEquals;
+procedure TestTStringTerm.TestEquals;
 var
-  Other: TStringElement;
-  Same:  TStringElement;
+  Other: TStringTerm;
+  Same:  TStringTerm;
 begin
-  Other := TStringElement.Create(Self.S.Value + '1');
+  Other := TStringTerm.Create(Self.S.Value + '1');
   try
     Check(not Other.Equals(Self.S), 'Other = S');
     Check(not Self.S.Equals(Other), 'S = Other');
@@ -789,7 +789,7 @@ begin
     Other.Free;
   end;
 
-  Same := TStringElement.Create(Self.S.Value);
+  Same := TStringTerm.Create(Self.S.Value);
   try
     Check(Same.Equals(Self.S), 'Same <> S');
     Check(Self.S.Equals(Same), 'S <> Same');
@@ -798,32 +798,32 @@ begin
   end;
 end;
 
-procedure TestTStringElement.TestIsBoolean;
+procedure TestTStringTerm.TestIsBoolean;
 begin
   Check(not Self.S.IsBoolean, 'Element marked as a Boolean');
 end;
 
-procedure TestTStringElement.TestIsInteger;
+procedure TestTStringTerm.TestIsInteger;
 begin
   Check(not Self.S.IsInteger, 'Element marked as an Integer');
 end;
 
-procedure TestTStringElement.TestIsProcessID;
+procedure TestTStringTerm.TestIsProcessID;
 begin
   Check(not Self.S.IsProcessID, 'Element marked as a ProcessID');
 end;
 
-procedure TestTStringElement.TestIsString;
+procedure TestTStringTerm.TestIsString;
 begin
   Check(Self.S.IsString, 'Element not marked as a String');
 end;
 
-procedure TestTStringElement.TestIsTuple;
+procedure TestTStringTerm.TestIsTuple;
 begin
   Check(not Self.S.IsTuple, 'Element marked as a Tuple');
 end;
 
-procedure TestTStringElement.TestValue;
+procedure TestTStringTerm.TestValue;
 begin
   CheckEquals('hello', Self.S.Value, 'Value not set in constructor');
 end;
@@ -868,13 +868,13 @@ end;
 
 procedure TestTTuple.TestAdd;
 var
-  B: TBooleanElement;
-  I: TIntegerElement;
-  S: TStringElement;
+  B: TBooleanTerm;
+  I: TIntegerTerm;
+  S: TStringTerm;
 begin
   CheckEquals(0, Self.T.Count, 'Sanity check: T should have no elements');
 
-  B := TBooleanElement.Create(true);
+  B := TBooleanTerm.Create(true);
   try
     Self.T.Add(B);
     CheckEquals(1, Self.T.Count, 'Boolean not added');
@@ -884,7 +884,7 @@ begin
     B.Free;
   end;
 
-  I := TIntegerElement.Create(42);
+  I := TIntegerTerm.Create(42);
   try
     Self.T.Add(I);
     CheckEquals(2, Self.T.Count, 'Integer not added');
@@ -894,7 +894,7 @@ begin
     I.Free;
   end;
 
-  S := TStringElement.Create('hello');
+  S := TStringTerm.Create('hello');
   try
     Self.T.Add(S);
     CheckEquals(3, Self.T.Count, 'String not added');
@@ -911,11 +911,11 @@ begin
   Self.T.AddBoolean(false);
 
   CheckEquals(2, Self.T.Count, 'Incorrect number of elements');
-  CheckEquals(TBooleanElement.ClassName, Self.T[0].ClassName, 'First element type');
-  CheckEquals(TBooleanElement.ClassName, Self.T[1].ClassName, 'Second element type');
+  CheckEquals(TBooleanTerm.ClassName, Self.T[0].ClassName, 'First element type');
+  CheckEquals(TBooleanTerm.ClassName, Self.T[1].ClassName, 'Second element type');
 
-  CheckEquals(true, TBooleanElement(Self.T[0]).Value, 'First element value');
-  CheckEquals(false, TBooleanElement(Self.T[1]).Value, 'Second element value');
+  CheckEquals(true, TBooleanTerm(Self.T[0]).Value, 'First element value');
+  CheckEquals(false, TBooleanTerm(Self.T[1]).Value, 'Second element value');
 end;
 
 procedure TestTTuple.TestAddInteger;
@@ -924,11 +924,11 @@ begin
   Self.T.AddInteger(1);
 
   CheckEquals(2, Self.T.Count, 'Incorrect number of elements');
-  CheckEquals(TIntegerElement.ClassName, Self.T[0].ClassName, 'First element type');
-  CheckEquals(TIntegerElement.ClassName, Self.T[1].ClassName, 'Second element type');
+  CheckEquals(TIntegerTerm.ClassName, Self.T[0].ClassName, 'First element type');
+  CheckEquals(TIntegerTerm.ClassName, Self.T[1].ClassName, 'Second element type');
 
-  CheckEquals(0, TIntegerElement(Self.T[0]).Value, 'First element value');
-  CheckEquals(1, TIntegerElement(Self.T[1]).Value, 'Second element value');
+  CheckEquals(0, TIntegerTerm(Self.T[0]).Value, 'First element value');
+  CheckEquals(1, TIntegerTerm(Self.T[1]).Value, 'Second element value');
 end;
 
 procedure TestTTuple.TestAddProcessID;
@@ -937,11 +937,11 @@ begin
   Self.T.AddProcessID('04aa000f-edb4-4b58-9f9d-c9b1138d485f');
 
   CheckEquals(2, Self.T.Count, 'Incorrect number of elements');
-  CheckEquals(TProcessIDElement.ClassName, Self.T[0].ClassName, 'First element type');
-  CheckEquals(TProcessIDElement.ClassName, Self.T[1].ClassName, 'Second element type');
+  CheckEquals(TProcessIDTerm.ClassName, Self.T[0].ClassName, 'First element type');
+  CheckEquals(TProcessIDTerm.ClassName, Self.T[1].ClassName, 'Second element type');
 
-  CheckEquals('dd3e05ec-60a4-4f57-9c3e-f8897b66497b', TProcessIDElement(Self.T[0]).Value, 'First element value');
-  CheckEquals('04aa000f-edb4-4b58-9f9d-c9b1138d485f', TProcessIDElement(Self.T[1]).Value, 'Second element value');
+  CheckEquals('dd3e05ec-60a4-4f57-9c3e-f8897b66497b', TProcessIDTerm(Self.T[0]).Value, 'First element value');
+  CheckEquals('04aa000f-edb4-4b58-9f9d-c9b1138d485f', TProcessIDTerm(Self.T[1]).Value, 'Second element value');
 end;
 
 procedure TestTTuple.TestAddString;
@@ -950,11 +950,11 @@ begin
   Self.T.AddString('pong');
 
   CheckEquals(2, Self.T.Count, 'Incorrect number of elements');
-  CheckEquals(TStringElement.ClassName, Self.T[0].ClassName, 'First element type');
-  CheckEquals(TStringElement.ClassName, Self.T[1].ClassName, 'Second element type');
+  CheckEquals(TStringTerm.ClassName, Self.T[0].ClassName, 'First element type');
+  CheckEquals(TStringTerm.ClassName, Self.T[1].ClassName, 'Second element type');
 
-  CheckEquals('ping', TStringElement(Self.T[0]).Value, 'First element value');
-  CheckEquals('pong', TStringElement(Self.T[1]).Value, 'Second element value');
+  CheckEquals('ping', TStringTerm(Self.T[0]).Value, 'First element value');
+  CheckEquals('pong', TStringTerm(Self.T[1]).Value, 'Second element value');
 end;
 
 procedure TestTTuple.TestAsString;
@@ -1657,7 +1657,7 @@ begin
   O := TMessageTuple.Overlay(Msg.Data);
   try
     Self.ExitRecvd := true;
-    Self.Reason    := (O.Parameters[0] as TStringElement).Value;
+    Self.Reason    := (O.Parameters[0] as TStringTerm).Value;
   finally
     O.Free;
   end;

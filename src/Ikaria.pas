@@ -30,11 +30,11 @@ type
   TActorClass = class of TActor;
   TProcessID = String;
 
-  TTupleElement = class(TObject)
+  TTerm = class(TObject)
   public
     function AsString: String; virtual;
-    function Copy: TTupleElement; virtual;
-    function Equals(Other: TTupleElement): Boolean; virtual;
+    function Copy: TTerm; virtual;
+    function Equals(Other: TTerm): Boolean; virtual;
     function IsBoolean: Boolean; virtual;
     function IsInteger: Boolean; virtual;
     function IsProcessID: Boolean; virtual;
@@ -42,57 +42,57 @@ type
     function IsTuple: Boolean; virtual;
   end;
 
-  TBooleanElement = class(TTupleElement)
+  TBooleanTerm = class(TTerm)
   private
     fValue: Boolean;
   public
     constructor Create(Value: Boolean);
 
     function AsString: String; override;
-    function Copy: TTupleElement; override;
-    function Equals(Other: TTupleElement): Boolean; override;
+    function Copy: TTerm; override;
+    function Equals(Other: TTerm): Boolean; override;
     function IsBoolean: Boolean; override;
 
     property Value: Boolean read fValue;
   end;
 
-  TIntegerElement = class(TTupleElement)
+  TIntegerTerm = class(TTerm)
   private
     fValue: Integer;
   public
     constructor Create(Value: Integer);
 
     function AsString: String; override;
-    function Copy: TTupleElement; override;
-    function Equals(Other: TTupleElement): Boolean; override;
+    function Copy: TTerm; override;
+    function Equals(Other: TTerm): Boolean; override;
     function IsInteger: Boolean; override;
 
     property Value: Integer read fValue;
   end;
 
-  TProcessIDElement = class(TTupleElement)
+  TProcessIDTerm = class(TTerm)
   private
     fValue: TProcessID;
   public
     constructor Create(Value: TProcessID);
 
     function AsString: String; override;
-    function Copy: TTupleElement; override;
-    function Equals(Other: TTupleElement): Boolean; override;
+    function Copy: TTerm; override;
+    function Equals(Other: TTerm): Boolean; override;
     function IsProcessID: Boolean; override;
 
     property Value: TProcessID read fValue;
   end;
 
-  TStringElement = class(TTupleElement)
+  TStringTerm = class(TTerm)
   private
     fValue: String;
   public
     constructor Create(Value: String);
 
     function AsString: String; override;
-    function Copy: TTupleElement; override;
-    function Equals(Other: TTupleElement): Boolean; override;
+    function Copy: TTerm; override;
+    function Equals(Other: TTerm): Boolean; override;
     function IsString: Boolean; override;
 
     property Value: String read fValue;
@@ -100,29 +100,29 @@ type
 
   TTupleClass = class of TTuple;
 
-  TTuple = class(TTupleElement)
+  TTuple = class(TTerm)
   private
     TupleElements: TObjectList;
 
-    function GetElement(Index: Integer): TTupleElement;
+    function GetElement(Index: Integer): TTerm;
     function ThisClassType: TTupleClass;
   public
     constructor Create;
     destructor  Destroy; override;
 
-    procedure Add(E: TTupleElement);
+    procedure Add(E: TTerm);
     procedure AddBoolean(B: Boolean);
     procedure AddInteger(I: Integer);
     procedure AddProcessID(PID: TProcessID);
     procedure AddString(S: String);
     function  AsString: String; override;
-    function  Copy: TTupleElement; override;
+    function  Copy: TTerm; override;
     function  Count: Integer;
-    function  Equals(Other: TTupleElement): Boolean; override;
+    function  Equals(Other: TTerm): Boolean; override;
     function  RouteTo(NewDest: TProcessID): TTuple;
     function  IsTuple: Boolean; override;
 
-    property Elements[Index: Integer]: TTupleElement read GetElement; default;
+    property Elements[Index: Integer]: TTerm read GetElement; default;
   end;
 
   // The base class of all standard messages in Ikaria, MessageTuples look like
@@ -648,179 +648,179 @@ begin
 end;
 
 //******************************************************************************
-//* TTupleElement                                                              *
+//* TTerm                                                                      *
 //******************************************************************************
-//* TTupleElement Public methods ***********************************************
+//* TTerm Public methods *******************************************************
 
-function TTupleElement.AsString: String;
+function TTerm.AsString: String;
 begin
   // By default, do nothing:
   Result := '';
 end;
 
-function TTupleElement.Copy: TTupleElement;
+function TTerm.Copy: TTerm;
 begin
   raise EAbstractError.Create(Self.ClassName + ' must override Copy');
 end;
 
-function TTupleElement.Equals(Other: TTupleElement): Boolean;
+function TTerm.Equals(Other: TTerm): Boolean;
 begin
   Result := Self.ClassType = Other.ClassType;
 end;
 
-function TTupleElement.IsBoolean: Boolean;
+function TTerm.IsBoolean: Boolean;
 begin
   Result := false;
 end;
 
-function TTupleElement.IsInteger: Boolean;
+function TTerm.IsInteger: Boolean;
 begin
   Result := false;
 end;
 
-function TTupleElement.IsProcessID: Boolean;
+function TTerm.IsProcessID: Boolean;
 begin
   Result := false;
 end;
 
-function TTupleElement.IsString: Boolean;
+function TTerm.IsString: Boolean;
 begin
   Result := false;
 end;
 
-function TTupleElement.IsTuple: Boolean;
+function TTerm.IsTuple: Boolean;
 begin
   Result := false;
 end;
 
 //******************************************************************************
-//* TBooleanElement                                                            *
+//* TBooleanTerm                                                               *
 //******************************************************************************
-//* TBooleanElement Public methods *********************************************
+//* TBooleanTerm Public methods ************************************************
 
-constructor TBooleanElement.Create(Value: Boolean);
+constructor TBooleanTerm.Create(Value: Boolean);
 begin
   inherited Create;
 
   Self.fValue := Value;
 end;
 
-function TBooleanElement.AsString: String;
+function TBooleanTerm.AsString: String;
 begin
   Result := BoolStrs[Self.Value];
 end;
 
-function TBooleanElement.Copy: TTupleElement;
+function TBooleanTerm.Copy: TTerm;
 begin
-  Result := TBooleanElement.Create(Self.Value);
+  Result := TBooleanTerm.Create(Self.Value);
 end;
 
-function TBooleanElement.Equals(Other: TTupleElement): Boolean;
+function TBooleanTerm.Equals(Other: TTerm): Boolean;
 begin
   Result := inherited Equals(Other) and
-            (Self.Value = TBooleanElement(Other).Value);
+            (Self.Value = TBooleanTerm(Other).Value);
 end;
 
-function TBooleanElement.IsBoolean: Boolean;
+function TBooleanTerm.IsBoolean: Boolean;
 begin
   Result := true;
 end;
 
 //******************************************************************************
-//* TIntegerElement                                                            *
+//* TIntegerTerm                                                               *
 //******************************************************************************
-//* TIntegerElement Public methods *********************************************
+//* TIntegerTerm Public methods ************************************************
 
-constructor TIntegerElement.Create(Value: Integer);
+constructor TIntegerTerm.Create(Value: Integer);
 begin
   inherited Create;
 
   Self.fValue := Value;
 end;
 
-function TIntegerElement.AsString: String;
+function TIntegerTerm.AsString: String;
 begin
   Result := IntToStr(Self.Value);
 end;
 
-function TIntegerElement.Copy: TTupleElement;
+function TIntegerTerm.Copy: TTerm;
 begin
-  Result := TIntegerElement.Create(Self.Value);
+  Result := TIntegerTerm.Create(Self.Value);
 end;
 
-function TIntegerElement.Equals(Other: TTupleElement): Boolean;
+function TIntegerTerm.Equals(Other: TTerm): Boolean;
 begin
   Result := inherited Equals(Other) and
-            (Self.Value = TIntegerElement(Other).Value);
+            (Self.Value = TIntegerTerm(Other).Value);
 end;
 
-function TIntegerElement.IsInteger: Boolean;
+function TIntegerTerm.IsInteger: Boolean;
 begin
   Result := true;
 end;
 
 //******************************************************************************
-//* TProcessIDElement                                                          *
+//* TProcessIDTerm                                                             *
 //******************************************************************************
-//* TProcessIDElement Public methods *******************************************
+//* TProcessIDTerm Public methods **********************************************
 
-constructor TProcessIDElement.Create(Value: TProcessID);
+constructor TProcessIDTerm.Create(Value: TProcessID);
 begin
   inherited Create;
 
   Self.fValue := Value;
 end;
 
-function TProcessIDElement.AsString: String;
+function TProcessIDTerm.AsString: String;
 begin
   Result := Format('{%s}', [Self.Value]);
 end;
 
-function TProcessIDElement.Copy: TTupleElement;
+function TProcessIDTerm.Copy: TTerm;
 begin
-  Result := TProcessIDElement.Create(Self.Value);
+  Result := TProcessIDTerm.Create(Self.Value);
 end;
 
-function TProcessIDElement.Equals(Other: TTupleElement): Boolean;
+function TProcessIDTerm.Equals(Other: TTerm): Boolean;
 begin
   Result := inherited Equals(Other) and
-            (Self.Value = TProcessIDElement(Other).Value);
+            (Self.Value = TProcessIDTerm(Other).Value);
 end;
 
-function TProcessIDElement.IsProcessID: Boolean;
+function TProcessIDTerm.IsProcessID: Boolean;
 begin
   Result := true;
 end;
 
 //******************************************************************************
-//* TStringElement                                                             *
+//* TStringTerm                                                                *
 //******************************************************************************
-//* TStringElement Public methods **********************************************
+//* TStringTerm Public methods *************************************************
 
-constructor TStringElement.Create(Value: String);
+constructor TStringTerm.Create(Value: String);
 begin
   inherited Create;
 
   Self.fValue := Value;
 end;
 
-function TStringElement.AsString: String;
+function TStringTerm.AsString: String;
 begin
   Result := Format('"%s"', [Self.Value]);
 end;
 
-function TStringElement.Copy: TTupleElement;
+function TStringTerm.Copy: TTerm;
 begin
-  Result := TStringElement.Create(Self.Value);
+  Result := TStringTerm.Create(Self.Value);
 end;
 
-function TStringElement.Equals(Other: TTupleElement): Boolean;
+function TStringTerm.Equals(Other: TTerm): Boolean;
 begin
   Result := inherited Equals(Other) and
-            (Self.Value = TStringElement(Other).Value);
+            (Self.Value = TStringTerm(Other).Value);
 end;
 
-function TStringElement.IsString: Boolean;
+function TStringTerm.IsString: Boolean;
 begin
   Result := true;
 end;
@@ -844,29 +844,29 @@ begin
   inherited Destroy;
 end;
 
-procedure TTuple.Add(E: TTupleElement);
+procedure TTuple.Add(E: TTerm);
 begin
   Self.TupleElements.Add(E.Copy);
 end;
 
 procedure TTuple.AddBoolean(B: Boolean);
 begin
-  Self.TupleElements.Add(TBooleanElement.Create(B));
+  Self.TupleElements.Add(TBooleanTerm.Create(B));
 end;
 
 procedure TTuple.AddInteger(I: Integer);
 begin
-  Self.TupleElements.Add(TIntegerElement.Create(I));
+  Self.TupleElements.Add(TIntegerTerm.Create(I));
 end;
 
 procedure TTuple.AddProcessID(PID: TProcessID);
 begin
-  Self.TupleElements.Add(TProcessIDElement.Create(PID));
+  Self.TupleElements.Add(TProcessIDTerm.Create(PID));
 end;
 
 procedure TTuple.AddString(S: String);
 begin
-  Self.TupleElements.Add(TStringElement.Create(S));
+  Self.TupleElements.Add(TStringTerm.Create(S));
 end;
 
 function TTuple.AsString: String;
@@ -883,7 +883,7 @@ begin
   Result := Trim(Result) + ')'
 end;
 
-function TTuple.Copy: TTupleElement;
+function TTuple.Copy: TTerm;
 var
   I: Integer;
   NewT: TTuple;
@@ -901,7 +901,7 @@ begin
   Result := Self.TupleElements.Count;
 end;
 
-function TTuple.Equals(Other: TTupleElement): Boolean;
+function TTuple.Equals(Other: TTerm): Boolean;
 var
   I:          Integer;
   OtherTuple: TTuple;
@@ -946,9 +946,9 @@ end;
 
 //* TTuple Private methods *****************************************************
 
-function TTuple.GetElement(Index: Integer): TTupleElement;
+function TTuple.GetElement(Index: Integer): TTerm;
 begin
-  Result := Self.TupleElements[Index] as TTupleElement;
+  Result := Self.TupleElements[Index] as TTerm;
 end;
 
 function TTuple.ThisClassType: TTupleClass;
@@ -1003,12 +1003,12 @@ end;
 
 function TMessageTuple.GetReplyTo: TProcessID;
 begin
-  Result := (Self[1] as TProcessIDElement).Value;
+  Result := (Self[1] as TProcessIDTerm).Value;
 end;
 
 function TMessageTuple.GetMessageName: String;
 begin
-  Result := (Self[0] as TStringElement).Value;
+  Result := (Self[0] as TStringTerm).Value;
 end;
 
 function TMessageTuple.GetParameters: TTuple;
@@ -1627,9 +1627,9 @@ begin
 
   if Result then begin
     Result := Msg.Data[0].IsString
-           and (TStringElement(Msg.Data[0]).Value = ExitMsg)
+           and (TStringTerm(Msg.Data[0]).Value = ExitMsg)
            and Msg.Data[1].IsString
-           and (TStringElement(Msg.Data[1]).Value = ExitReasonKill);
+           and (TStringTerm(Msg.Data[1]).Value = ExitReasonKill);
   end;
 end;
 

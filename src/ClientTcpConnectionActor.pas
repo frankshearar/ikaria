@@ -94,17 +94,17 @@ end;
 
 function TLocationTuple.GetAddress: String;
 begin
-  Result := TStringElement(Self[0]).Value;
+  Result := TStringTerm(Self[0]).Value;
 end;
 
 function TLocationTuple.GetPort: Integer;
 begin
-  Result := TIntegerElement(Self[1]).Value;
+  Result := TIntegerTerm(Self[1]).Value;
 end;
 
 function TLocationTuple.GetTransport: String;
 begin
-  Result := TStringElement(Self[2]).Value;
+  Result := TStringTerm(Self[2]).Value;
 end;
 
 //******************************************************************************
@@ -185,13 +185,13 @@ end;
 function TClientTcpConnectionActor.FindClose(Msg: TActorMessage): Boolean;
 begin
   Result := (Msg.Data.Count > 0)
-         and ((Msg.Data[0] as TStringElement).Value = CloseConnectionMsg);
+         and ((Msg.Data[0] as TStringTerm).Value = CloseConnectionMsg);
 end;
 
 function TClientTcpConnectionActor.FindConnect(Msg: TActorMessage): Boolean;
 begin
   Result := (Msg.Data.Count > 0)
-         and ((Msg.Data[0] as TStringElement).Value = ConnectMsg);
+         and ((Msg.Data[0] as TStringTerm).Value = ConnectMsg);
 end;
 
 procedure TClientTcpConnectionActor.SignalClosureTo(Target: TProcessID);

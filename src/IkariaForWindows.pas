@@ -64,7 +64,7 @@ var
 begin
   O := TMessageTuple.Overlay(Msg.Data);
   try
-    Self.TargetHandle := (O.Parameters[0] as TIntegerElement).Value;
+    Self.TargetHandle := (O.Parameters[0] as TIntegerTerm).Value;
   finally
     O.Free;
   end;

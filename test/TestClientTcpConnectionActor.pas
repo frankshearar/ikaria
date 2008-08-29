@@ -174,7 +174,7 @@ begin
 
   LastSentMsg := Self.CopyLastSentMsg;
   try
-    CheckEquals(ConnectedMsg, (LastSentMsg.Data[0] as TStringElement).Value, 'Unexpected message');
+    CheckEquals(ConnectedMsg, (LastSentMsg.Data[0] as TStringTerm).Value, 'Unexpected message');
   finally
     LastSentMsg.Free;
   end;
