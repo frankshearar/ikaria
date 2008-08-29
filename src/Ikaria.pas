@@ -275,6 +275,7 @@ type
     property Terminated: Boolean    read fTerminated write fTerminated;
   end;
 
+  // I provide some convenience methods for the RPC function.
   TActorInterfaceForRPC = class(TActorInterface)
   private
     fResult: TTuple;
@@ -297,6 +298,7 @@ type
   TActor = class(TThread)
   private
     function  GetPID: TProcessID;
+    procedure ReactToExit(Msg: TActorMessage);
     procedure ReactToKill(Msg: TActorMessage);
     procedure RegisterRequiredActions(Table: TActorMessageTable);
     procedure SendExit(Reason: TTuple);
@@ -306,6 +308,7 @@ type
     ParentID: TProcessID;
 
     procedure Execute; override;
+    function  FindExit(Msg: TActorMessage): Boolean;
     function  FindKill(Msg: TActorMessage): Boolean;
     function  MatchAny(Msg: TActorMessage): Boolean;
     function  MatchMessageName(Msg: TActorMessage; MsgName: String): Boolean;
@@ -343,6 +346,9 @@ type
 
 // Return a new PID.
 function ConstructUUID: String;
+
+// Ask an Actor to terminate for a given Reason.
+procedure ExitActor(Target: TProcessID; Reason: TTuple); overload;
 
 // Unconditionally kill an Actor. Think hard before using it!
 procedure Kill(Target: TProcessID);
@@ -582,16 +588,27 @@ end;
 //* Unit Public functions/procedures                                           *
 //******************************************************************************
 
+procedure ExitActor(Target: TProcessID; Reason: TTuple);
+var
+  E: TMessageTuple;
+begin
+  E := TMessageTuple.Create(ExitMsg, TActor.RootActor, Reason);
+  try
+    SendActorMessage(Target, E);
+  finally
+    E.Free;
+  end;
+end;
+
 procedure Kill(Target: TProcessID);
 var
   Kill: TTuple;
 begin
   Kill := TTuple.Create;
   try
-    Kill.AddString(ExitMsg);
     Kill.AddString(ExitReasonKill);
 
-    SendActorMessage(Target, Kill);
+    ExitActor(Target, Kill);
   finally
     Kill.Free;
   end;
@@ -1621,6 +1638,11 @@ begin
   end;
 end;
 
+function TActor.FindExit(Msg: TActorMessage): Boolean;
+begin
+  Result := Self.MatchMessageName(Msg, ExitMsg);
+end;
+
 function TActor.FindKill(Msg: TActorMessage): Boolean;
 begin
   Result := Msg.Data.Count > 1;
@@ -1714,6 +1736,11 @@ begin
   Result := Self.Intf.PID;
 end;
 
+procedure TActor.ReactToExit(Msg: TActorMessage);
+begin
+  Self.Terminate;
+end;
+
 procedure TActor.ReactToKill(Msg: TActorMessage);
 begin
   Self.Terminate;
@@ -1721,7 +1748,13 @@ end;
 
 procedure TActor.RegisterRequiredActions(Table: TActorMessageTable);
 begin
+  // The Kill message - ("exit" {some-pid} ("kill")) - has a tighter definition
+  // than a normal exit.
+  //
+  // Hence we try match it first, because FindExit will find all the OTHER
+  // possible exit messages.
   Table.Add(Self.FindKill, Self.ReactToKill);
+  Table.Add(Self.FindExit, Self.ReactToExit);  
 end;
 
 procedure TActor.SendExit(Reason: TTuple);

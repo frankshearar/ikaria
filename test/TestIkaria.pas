@@ -249,6 +249,7 @@ type
     procedure SetUp; override;
     procedure TearDown; override;
   published
+    procedure TestActorAcceptsExitMessage;
     procedure TestActorAcceptsKillMessage;
     procedure TestActorNotifiesLinkSetOfAbnormalExit;
     procedure TestActorNotifiesLinkSetOfExit;
@@ -1669,6 +1670,25 @@ begin
 end;
 
 //* TestTActor Published methods ***********************************************
+
+procedure TestTActor.TestActorAcceptsExitMessage;
+var
+  PID: TProcessID;
+  Reason: TTuple;
+begin
+  PID := Spawn(TActor);
+
+  Reason := TTuple.Create;
+  try
+    Reason.AddString('Just because');
+    ExitActor(PID, Reason);
+
+    Self.WaitForExit;
+    Check(Self.ActorExited, 'Actor didn''t exit, so didn''t accept the exit request');
+  finally
+    Reason.Free;
+  end;
+end;
 
 procedure TestTActor.TestActorAcceptsKillMessage;
 var
