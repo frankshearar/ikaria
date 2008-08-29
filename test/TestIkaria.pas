@@ -238,6 +238,7 @@ type
   private
     E:         TEvent;
     ExitRecvd: Boolean;
+    Reason:    String;
     TestMsg:   TTuple;
     TimedOut:  Boolean;
 
@@ -249,6 +250,7 @@ type
     procedure TearDown; override;
   published
     procedure TestActorAcceptsKillMessage;
+    procedure TestActorNotifiesLinkSetOfAbnormalExit;
     procedure TestActorNotifiesLinkSetOfExit;
     procedure TestActorsCanReceiveMessages;
   end;
@@ -285,6 +287,15 @@ type
     procedure EchoMessage(Msg: TActorMessage);
   protected
     procedure RegisterActions(Table: TActorMessageTable); override;
+  end;
+
+  TErrorActor = class(TActor)
+  protected
+    procedure Run; override;
+  public
+    class function ExpectedReason: String;
+    class function ExceptionType: ExceptClass;
+    class function ExceptionReason: String;
   end;
 
   TSingleShotActor = class(TActor)
@@ -394,6 +405,33 @@ end;
 procedure TEchoActor.EchoMessage(Msg: TActorMessage);
 begin
   Self.Intf.Send(TProcessIDElement(Msg.Data[1]).Value, Msg.Data);
+end;
+
+//******************************************************************************
+//* TErrorActor                                                                *
+//******************************************************************************
+//* TErrorActor Public methods *************************************************
+
+class function TErrorActor.ExpectedReason: String;
+begin
+  Result := Format(ExitReasonException, [Self.ExceptionType.ClassName, Self.ExceptionReason]);
+end;
+
+class function TErrorActor.ExceptionType: ExceptClass;
+begin
+  Result := Exception;
+end;
+
+class function TErrorActor.ExceptionReason: String;
+begin
+  Result := 'Foo';
+end;
+
+//* TErrorActor Protected methods **********************************************
+
+procedure TErrorActor.Run;
+begin
+  raise Self.ExceptionType.Create(Self.ExceptionReason);
 end;
 
 //******************************************************************************
@@ -1582,6 +1620,7 @@ begin
   Self.TestMsg := TMessageTuple.Create(TestName, '');
 
   Self.ExitRecvd := false;
+  Self.Reason    := '';
   Self.TimedOut  := false;
 end;
 
@@ -1612,8 +1651,16 @@ begin
 end;
 
 procedure TestTActor.RecordExit(Msg: TActorMessage);
+var
+  O: TMessageTuple;
 begin
-  Self.ExitRecvd := true;
+  O := TMessageTuple.Overlay(Msg.Data);
+  try
+    Self.ExitRecvd := true;
+    Self.Reason    := (O.Parameters[0] as TStringElement).Value;
+  finally
+    O.Free;
+  end;
 end;
 
 procedure TestTActor.Timeout;
@@ -1634,6 +1681,23 @@ begin
   Check(Self.ActorExited, 'Actor didn''t exit, so didn''t accept the kill');
 end;
 
+procedure TestTActor.TestActorNotifiesLinkSetOfAbnormalExit;
+var
+  I: TActorInterface;
+begin
+  I := TActorInterface.Create;
+  try
+    I.SpawnLink(TErrorActor);
+
+    I.Receive(Self.MatchExit, Self.RecordExit, OneSecond, Self.Timeout);
+    Check(not Self.TimedOut, 'Timed out waiting for message');
+    Check(Self.ExitRecvd, Format('No %s message received', [ExitMsg]));
+    CheckEquals(TErrorActor.ExpectedReason, Self.Reason, 'Unexpected reason for exit');
+  finally
+    I.Free;
+  end;
+end;
+
 procedure TestTActor.TestActorNotifiesLinkSetOfExit;
 var
   I: TActorInterface;
@@ -1645,6 +1709,7 @@ begin
     I.Receive(Self.MatchExit, Self.RecordExit, OneSecond, Self.Timeout);
     Check(not Self.TimedOut, 'Timed out waiting for message');
     Check(Self.ExitRecvd, Format('No %s message received', [ExitMsg]));
+    CheckEquals(ExitReasonNormal, Self.Reason, 'Unexpected reason for exit');
   finally
     I.Free;
   end;
