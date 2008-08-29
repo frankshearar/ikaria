@@ -1667,7 +1667,7 @@ end;
 
 procedure TActor.SendExceptionalExit(E: Exception);
 var
-  Reason:  TTuple;
+  Reason: TTuple;
 begin
   Reason := TTuple.Create;
   try
@@ -1678,7 +1678,7 @@ begin
   end;
 end;
 
-    procedure TActor.SendNormalExit;
+procedure TActor.SendNormalExit;
 var
   Reason: TTuple;
 begin
