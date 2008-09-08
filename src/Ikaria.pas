@@ -592,6 +592,18 @@ begin
   TActorRunner.Create(A);
 end;
 
+function PrimitiveSpawnLink(ActorType: TActorClass; Parent: TProcessID): TProcessID;
+var
+  Child: TActor;
+begin
+  Child := ActorType.Create(Parent);
+  PrimitiveLink(Parent, Child.PID);
+
+  Result := Child.PID;
+
+  TActorRunner.Create(Child);
+end;
+
 procedure PrimitiveUnregisterActor(A: TActorMailbox);
 var
   Index: Integer;
@@ -1510,16 +1522,8 @@ begin
 end;
 
 function TActorInterface.SpawnLink(ActorType: TActorClass): TProcessID;
-var
-  A: TActor;
 begin
-  // This needs to hook into the Primitive layer.
-  A := ActorType.Create(Self.PID);
-  Self.Link(A.PID);
-
-  Result := A.PID;
-
-  TActorRunner.Create(A);
+  Result := PrimitiveSpawnLink(ActorType, Self.PID);
 end;
 
 //* TActorInterface Private methods ********************************************
