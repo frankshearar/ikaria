@@ -22,7 +22,7 @@ uses
 
 {$R *.res}
 
-//{$DEFINE DEMO}
+{$DEFINE DEMO}
 
 begin
   {$IFNDEF DEMO}

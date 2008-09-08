@@ -34,11 +34,11 @@ type
     function  ClientCountOf(S: TIdTcpServer): Integer;
     procedure CountConnections(Thread: TIdPeerThread);
     procedure DoNothing(Thread: TIdPeerThread);
-    function  FindClosed(Msg: TActorMessage): Boolean;
-    function  FindConnected(Msg: TActorMessage): Boolean;
-    procedure MarkClosed(Msg: TActorMessage);
-    procedure MarkConnected(Msg: TActorMessage);
-    function  MatchMessageName(Msg: TActorMessage; Name: String): Boolean;
+    function  FindClosed(Msg: TTuple): Boolean;
+    function  FindConnected(Msg: TTuple): Boolean;
+    procedure MarkClosed(Msg: TTuple);
+    procedure MarkConnected(Msg: TTuple);
+    function  MatchMessageName(Msg: TTuple; Name: String): Boolean;
     procedure OnDisconnect(Thread: TIdPeerThread);
     procedure Timeout;
     procedure WaitForTimeout(E: TEvent; Timeout: Cardinal; Msg: String);
@@ -139,32 +139,32 @@ procedure TestTClientTcpConnectionActor.DoNothing(Thread: TIdPeerThread);
 begin
 end;
 
-function TestTClientTcpConnectionActor.FindClosed(Msg: TActorMessage): Boolean;
+function TestTClientTcpConnectionActor.FindClosed(Msg: TTuple): Boolean;
 begin
   Result := Self.MatchMessageName(Msg, ClosedConnectionMsg);
 end;
 
-function TestTClientTcpConnectionActor.FindConnected(Msg: TActorMessage): Boolean;
+function TestTClientTcpConnectionActor.FindConnected(Msg: TTuple): Boolean;
 begin
   Result := Self.MatchMessageName(Msg, ConnectedMsg);
 end;
 
-procedure TestTClientTcpConnectionActor.MarkClosed(Msg: TActorMessage);
+procedure TestTClientTcpConnectionActor.MarkClosed(Msg: TTuple);
 begin
   Self.Closed := true;
 end;
 
-procedure TestTClientTcpConnectionActor.MarkConnected(Msg: TActorMessage);
+procedure TestTClientTcpConnectionActor.MarkConnected(Msg: TTuple);
 begin
   Self.Connected := true;
 end;
 
-function TestTClientTcpConnectionActor.MatchMessageName(Msg: TActorMessage; Name: String): Boolean;
+function TestTClientTcpConnectionActor.MatchMessageName(Msg: TTuple; Name: String): Boolean;
 var
   O: TMessageTuple;
 begin
   try
-    O := TMessageTuple.Overlay(Msg.Data);
+    O := TMessageTuple.Overlay(Msg);
     try
       Result := O.MessageName = Name;
     finally

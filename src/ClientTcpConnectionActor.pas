@@ -55,10 +55,10 @@ type
     Connection: TIdTcpClient;
     Controller: TProcessID;
 
-    procedure Close(Msg: TActorMessage);
-    procedure Connect(Msg: TActorMessage);
-    function  FindClose(Msg: TActorMessage): Boolean;
-    function  FindConnect(Msg: TActorMessage): Boolean;
+    procedure Close(Msg: TTuple);
+    procedure Connect(Msg: TTuple);
+    function  FindClose(Msg: TTuple): Boolean;
+    function  FindConnect(Msg: TTuple): Boolean;
     procedure SignalClosureTo(Target: TProcessID);
     procedure SignalOpeningTo(Target: TProcessID);
   protected
@@ -155,20 +155,20 @@ end;
 
 //* TClientTcpConnectionActor Private methods **********************************
 
-procedure TClientTcpConnectionActor.Close(Msg: TActorMessage);
+procedure TClientTcpConnectionActor.Close(Msg: TTuple);
 begin
   Self.Connection.Disconnect;
 
   Self.SignalClosureTo(Self.Controller);
 end;
 
-procedure TClientTcpConnectionActor.Connect(Msg: TActorMessage);
+procedure TClientTcpConnectionActor.Connect(Msg: TTuple);
 var
   Conn: TConnectMsg;
 begin
   if Self.Connection.Connected then Exit;
 
-  Conn := TConnectMsg.Overlay(Msg.Data);
+  Conn := TConnectMsg.Overlay(Msg);
   try
     Self.Controller := Conn.ReplyTo;
 
@@ -182,16 +182,16 @@ begin
   Self.SignalOpeningTo(Self.Controller);
 end;
 
-function TClientTcpConnectionActor.FindClose(Msg: TActorMessage): Boolean;
+function TClientTcpConnectionActor.FindClose(Msg: TTuple): Boolean;
 begin
-  Result := (Msg.Data.Count > 0)
-         and ((Msg.Data[0] as TStringTerm).Value = CloseConnectionMsg);
+  Result := (Msg.Count > 0)
+         and ((Msg[0] as TStringTerm).Value = CloseConnectionMsg);
 end;
 
-function TClientTcpConnectionActor.FindConnect(Msg: TActorMessage): Boolean;
+function TClientTcpConnectionActor.FindConnect(Msg: TTuple): Boolean;
 begin
-  Result := (Msg.Data.Count > 0)
-         and ((Msg.Data[0] as TStringTerm).Value = ConnectMsg);
+  Result := (Msg.Count > 0)
+         and ((Msg[0] as TStringTerm).Value = ConnectMsg);
 end;
 
 procedure TClientTcpConnectionActor.SignalClosureTo(Target: TProcessID);

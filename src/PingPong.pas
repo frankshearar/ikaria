@@ -37,9 +37,9 @@ type
   private
     Ponger: TProcessID;
 
-    function  FindPong(Msg: TActorMessage): Boolean;
+    function  FindPong(Msg: TTuple): Boolean;
     procedure Ping(PID: TProcessID);
-    procedure ReactToPong(Msg: TActorMessage);
+    procedure ReactToPong(Msg: TTuple);
   protected
     procedure RegisterActions(Table: TActorMessageTable); override;
     procedure Run; override;
@@ -47,9 +47,9 @@ type
 
   TPongActor = class(TActor)
   private
-    function  FindPing(Msg: TActorMessage): Boolean;
+    function  FindPing(Msg: TTuple): Boolean;
     procedure Pong(PID: TProcessID);
-    procedure ReactToPing(Msg: TActorMessage);
+    procedure ReactToPing(Msg: TTuple);
   protected
     procedure RegisterActions(Table: TActorMessageTable); override;
   end;
@@ -69,8 +69,8 @@ type
   private
     FibGen: TFibonacciGenerator;
 
-    function  FindNext(Msg: TActorMessage): Boolean;
-    procedure ReturnNextFibonacci(Msg: TActorMessage);
+    function  FindNext(Msg: TTuple): Boolean;
+    procedure ReturnNextFibonacci(Msg: TTuple);
   protected
     procedure RegisterActions(Table: TActorMessageTable); override;
   public
@@ -198,7 +198,7 @@ end;
 
 //* TPingActor Private methods *************************************************
 
-function TPingActor.FindPong(Msg: TActorMessage): Boolean;
+function TPingActor.FindPong(Msg: TTuple): Boolean;
 begin
   Result := Self.MatchMessageName(Msg, PongName);
 end;
@@ -208,7 +208,7 @@ begin
   Self.Send(PID, PingName);
 end;
 
-procedure TPingActor.ReactToPong(Msg: TActorMessage);
+procedure TPingActor.ReactToPong(Msg: TTuple);
 begin
   LogToDemo('', PongName, 0, 'PingPongDemo', LevelInfo, 0, Self.PID);
   Sleep(1000);
@@ -237,7 +237,7 @@ end;
 
 //* TPongActor Private methods *************************************************
 
-function TPongActor.FindPing(Msg: TActorMessage): Boolean;
+function TPongActor.FindPing(Msg: TTuple): Boolean;
 begin
   Result := Self.MatchMessageName(Msg, PingName);
 end;
@@ -247,7 +247,7 @@ begin
   Self.Send(PID, PongName);
 end;
 
-procedure TPongActor.ReactToPing(Msg: TActorMessage);
+procedure TPongActor.ReactToPing(Msg: TTuple);
 begin
   LogToDemo('', PingName, 0, 'PingPongDemo', LevelInfo, 0, Self.PID);
   Sleep(1000);
@@ -311,12 +311,12 @@ end;
 
 //* TFibonacciActor Private methods ********************************************
 
-function TFibonacciActor.FindNext(Msg: TActorMessage): Boolean;
+function TFibonacciActor.FindNext(Msg: TTuple): Boolean;
 begin
   Result := Self.MatchMessageName(Msg, NextName);
 end;
 
-procedure TFibonacciActor.ReturnNextFibonacci(Msg: TActorMessage);
+procedure TFibonacciActor.ReturnNextFibonacci(Msg: TTuple);
 var
   Answer: TTuple;
   Request: TMessageTuple;

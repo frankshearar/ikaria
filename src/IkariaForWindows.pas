@@ -18,9 +18,9 @@ type
   private
     TargetHandle: HWND;
 
-    function  MatchMessageQueueHandle(Msg: TActorMessage): Boolean;
-    procedure ForwardToMessageQueue(Msg: TActorMessage);
-    procedure SetMessageQueueHandle(Msg: TActorMessage);
+    function  MatchMessageQueueHandle(Msg: TTuple): Boolean;
+    procedure ForwardToMessageQueue(Msg: TTuple);
+    procedure SetMessageQueueHandle(Msg: TTuple);
   protected
     procedure RegisterActions(Table: TActorMessageTable); override;
   end;
@@ -44,25 +44,25 @@ end;
 
 //* TWindowsMessageForwarder Private methods ***********************************
 
-function TWindowsMessageForwarder.MatchMessageQueueHandle(Msg: TActorMessage): Boolean;
+function TWindowsMessageForwarder.MatchMessageQueueHandle(Msg: TTuple): Boolean;
 begin
   Result := Self.MatchMessageName(Msg, MessageQueueHandleName);
 end;
 
-procedure TWindowsMessageForwarder.ForwardToMessageQueue(Msg: TActorMessage);
+procedure TWindowsMessageForwarder.ForwardToMessageQueue(Msg: TTuple);
 begin
   // * Map the Msg to a (Windows) Message;
   // * dump the tuple into the WParam;
   // * send to a Windows message queue.
 
-  PostMessage(Self.TargetHandle, WM_IKARIA_MSG, WPARAM(Msg.Data.Copy), 0);
+  PostMessage(Self.TargetHandle, WM_IKARIA_MSG, WPARAM(Msg.Copy), 0);
 end;
 
-procedure TWindowsMessageForwarder.SetMessageQueueHandle(Msg: TActorMessage);
+procedure TWindowsMessageForwarder.SetMessageQueueHandle(Msg: TTuple);
 var
   O: TMessageTuple;
 begin
-  O := TMessageTuple.Overlay(Msg.Data);
+  O := TMessageTuple.Overlay(Msg);
   try
     Self.TargetHandle := (O.Parameters[0] as TIntegerTerm).Value;
   finally

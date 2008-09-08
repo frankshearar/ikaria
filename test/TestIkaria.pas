@@ -148,12 +148,12 @@ type
     M:       TActorMessage;
     NewMsgs: Boolean;
 
-    function  AllFinder(Msg: TActorMessage): Boolean;
+    function  AllFinder(Msg: TTuple): Boolean;
     procedure CheckFound(ExpectedTag: String;
                          Mbox: TActorMailbox;
                          Condition: TMessageFinder;
                          MsgPrefix: String);
-    function  NullFinder(Msg: TActorMessage): Boolean;
+    function  NullFinder(Msg: TTuple): Boolean;
     procedure RegisterMessageArrival(Sender: TObject);
   public
     procedure SetUp; override;
@@ -176,11 +176,11 @@ type
     ReceivedAFoo: Boolean;
     TimedOut:     Boolean;
 
-    procedure ActOnFooMsg(Msg: TActorMessage);
+    procedure ActOnFooMsg(Msg: TTuple);
     function  CreateBarMsg: TTuple;
     function  CreateFooMsg: TTuple;
     function  CreateMsgNamed(Name: String): TTuple;
-    function  RecogniseFooMsg(Msg: TActorMessage): Boolean;
+    function  RecogniseFooMsg(Msg: TTuple): Boolean;
     procedure Timeout;
   public
     procedure SetUp; override;
@@ -199,12 +199,12 @@ type
     FirstConditionWorked:  Boolean;
     SecondConditionWorked: Boolean;
     T:                     TActorMessageTable;
-    TestMsg:               TActorMessage;
+    TestMsg:               TTuple;
 
-    procedure FirstAction(Msg: TActorMessage);
-    function  FirstTestCondition(Msg: TActorMessage): Boolean;
-    procedure SecondAction(Msg: TActorMessage);
-    function  SecondTestCondition(Msg: TActorMessage): Boolean;
+    procedure FirstAction(Msg: TTuple);
+    function  FirstTestCondition(Msg: TTuple): Boolean;
+    procedure SecondAction(Msg: TTuple);
+    function  SecondTestCondition(Msg: TTuple): Boolean;
   public
     procedure SetUp; override;
     procedure TearDown; override;
@@ -242,8 +242,8 @@ type
     TestMsg:   TTuple;
     TimedOut:  Boolean;
 
-    function  MatchExit(Msg: TActorMessage): Boolean;
-    procedure RecordExit(Msg: TActorMessage);
+    function  MatchExit(Msg: TTuple): Boolean;
+    procedure RecordExit(Msg: TTuple);
     procedure Timeout;
   public
     procedure SetUp; override;
@@ -284,8 +284,8 @@ uses
 type
   TEchoActor = class(TActor)
   private
-    function  FindAllExceptKill(Msg: TActorMessage): Boolean;
-    procedure EchoMessage(Msg: TActorMessage);
+    function  FindAllExceptKill(Msg: TTuple): Boolean;
+    procedure EchoMessage(Msg: TTuple);
   protected
     procedure RegisterActions(Table: TActorMessageTable); override;
   end;
@@ -398,14 +398,14 @@ end;
 
 //* TEchoActor Private methods *************************************************
 
-function TEchoActor.FindAllExceptKill(Msg: TActorMessage): Boolean;
+function TEchoActor.FindAllExceptKill(Msg: TTuple): Boolean;
 begin
   Result := not Self.FindKill(Msg);
 end;
 
-procedure TEchoActor.EchoMessage(Msg: TActorMessage);
+procedure TEchoActor.EchoMessage(Msg: TTuple);
 begin
-  Self.Send(TProcessIDTerm(Msg.Data[1]).Value, Msg.Data);
+  Self.Send(TProcessIDTerm(Msg[1]).Value, Msg);
 end;
 
 //******************************************************************************
@@ -1140,7 +1140,7 @@ end;
 
 //* TestTActorMailbox Private methods ******************************************
 
-function TestTActorMailbox.AllFinder(Msg: TActorMessage): Boolean;
+function TestTActorMailbox.AllFinder(Msg: TTuple): Boolean;
 begin
   Result := true;
 end;
@@ -1161,7 +1161,7 @@ begin
   end;
 end;
 
-function TestTActorMailbox.NullFinder(Msg: TActorMessage): Boolean;
+function TestTActorMailbox.NullFinder(Msg: TTuple): Boolean;
 begin
   Result := false;
 end;
@@ -1315,7 +1315,7 @@ end;
 //* TestTActorInterface Private methods ****************************************
 
 
-procedure TestTActorInterface.ActOnFooMsg(Msg: TActorMessage);
+procedure TestTActorInterface.ActOnFooMsg(Msg: TTuple);
 begin
   Self.ReceivedAFoo := true;
 end;
@@ -1338,12 +1338,12 @@ begin
   Result := M;
 end;
 
-function TestTActorInterface.RecogniseFooMsg(Msg: TActorMessage): Boolean;
+function TestTActorInterface.RecogniseFooMsg(Msg: TTuple): Boolean;
 var
   O: TMessageTuple;
 begin
   try
-    O := TMessageTuple.Overlay(Msg.Data);
+    O := TMessageTuple.Overlay(Msg);
     try
       Result := O.MessageName = FooName;
     finally
@@ -1429,7 +1429,7 @@ begin
   inherited SetUp;
 
   Self.T := TActorMessageTable.Create;
-  Self.TestMsg := TActorMessage.Create;
+  Self.TestMsg := TTuple.Create;
 
   Self.FirstActionWorked     := false;
   Self.SecondActionWorked    := false;
@@ -1447,23 +1447,23 @@ end;
 
 //* TestTActorMessageTable Private methods *************************************
 
-procedure TestTActorMessageTable.FirstAction(Msg: TActorMessage);
+procedure TestTActorMessageTable.FirstAction(Msg: TTuple);
 begin
   Self.FirstActionWorked := true;
 end;
 
-function TestTActorMessageTable.FirstTestCondition(Msg: TActorMessage): Boolean;
+function TestTActorMessageTable.FirstTestCondition(Msg: TTuple): Boolean;
 begin
   Result := false;
   Self.FirstConditionWorked := true;
 end;
 
-procedure TestTActorMessageTable.SecondAction(Msg: TActorMessage);
+procedure TestTActorMessageTable.SecondAction(Msg: TTuple);
 begin
   Self.SecondActionWorked := true;
 end;
 
-function TestTActorMessageTable.SecondTestCondition(Msg: TActorMessage): Boolean;
+function TestTActorMessageTable.SecondTestCondition(Msg: TTuple): Boolean;
 begin
   Result := false;
   Self.SecondConditionWorked := true;
@@ -1635,12 +1635,12 @@ end;
 
 //* TestTActor Private methods *************************************************
 
-function TestTActor.MatchExit(Msg: TActorMessage): Boolean;
+function TestTActor.MatchExit(Msg: TTuple): Boolean;
 var
   O: TMessageTuple;
 begin
   try
-    O := TMessageTuple.Overlay(Msg.Data);
+    O := TMessageTuple.Overlay(Msg);
     try
       Result := O.MessageName = ExitMsg;
     finally
@@ -1651,11 +1651,11 @@ begin
   end;
 end;
 
-procedure TestTActor.RecordExit(Msg: TActorMessage);
+procedure TestTActor.RecordExit(Msg: TTuple);
 var
   O: TMessageTuple;
 begin
-  O := TMessageTuple.Overlay(Msg.Data);
+  O := TMessageTuple.Overlay(Msg);
   try
     Self.ExitRecvd := true;
     Self.Reason    := (O.Parameters[0] as TStringTerm).Value;

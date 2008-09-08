@@ -162,9 +162,9 @@ type
     property Tag:  String read fTag;
   end;
 
-  TMessageFinder = function(Msg: TActorMessage): Boolean of object;
+  TMessageFinder = function(Msg: TTuple): Boolean of object;
 
-  TActOnMessage = procedure(Msg: TActorMessage) of object;
+  TActOnMessage = procedure(Msg: TTuple) of object;
 
   TActorMessageTable = class;
 
@@ -283,10 +283,10 @@ type
   public
     destructor Destroy; override;
 
-    function  AllMatcher(Msg: TActorMessage): Boolean;
-    procedure NullAction(Msg: TActorMessage);
+    function  AllMatcher(Msg: TTuple): Boolean;
+    procedure NullAction(Msg: TTuple);
     procedure NullThunk;
-    procedure StoreFirstMessage(Msg: TActorMessage);
+    procedure StoreFirstMessage(Msg: TTuple);
 
     property Result: TTuple read fResult;
   end;
@@ -303,18 +303,18 @@ type
   // etc. - to my subclasses.
   TActor = class(TActorInterface)
   private
-    procedure ReactToExit(Msg: TActorMessage);
-    procedure ReactToKill(Msg: TActorMessage);
+    procedure ReactToExit(Msg: TTuple);
+    procedure ReactToKill(Msg: TTuple);
     procedure RegisterRequiredActions(Table: TActorMessageTable);
     procedure SendExit(Reason: TTuple);
   protected
     MsgTable: TActorMessageTable;
     ParentID: TProcessID;
 
-    function  FindExit(Msg: TActorMessage): Boolean;
-    function  FindKill(Msg: TActorMessage): Boolean;
-    function  MatchAny(Msg: TActorMessage): Boolean;
-    function  MatchMessageName(Msg: TActorMessage; MsgName: String): Boolean;
+    function  FindExit(Msg: TTuple): Boolean;
+    function  FindKill(Msg: TTuple): Boolean;
+    function  MatchAny(Msg: TTuple): Boolean;
+    function  MatchMessageName(Msg: TTuple; MsgName: String): Boolean;
     procedure RegisterActions(Table: TActorMessageTable); virtual;
     procedure Run; virtual;
     procedure SendExceptionalExit(E: Exception);
@@ -529,7 +529,7 @@ begin
   try
     if Assigned(Msg) then begin
       Result := true;
-      Table.Actions[I](Msg);
+      Table.Actions[I](Msg.Data);
     end;
   finally
     Msg.Free;
@@ -1187,7 +1187,7 @@ begin
       M := Self.MessageAt(I);
 
       for J := 0 to Table.Count - 1 do begin
-        if Table.Conditions[J](M) then begin
+        if Table.Conditions[J](M.Data) then begin
           FoundIndex := I;
           FoundMsg := M;
           Break;
@@ -1225,7 +1225,7 @@ begin
     for I := 0 to Self.Messages.Count - 1 do begin
       M := Self.MessageAt(I);
 
-      if Condition(M) then begin
+      if Condition(M.Data) then begin
         FoundIndex := I;
         Result := M.Copy;
         Self.FreeMessage(Self.Messages, M);
@@ -1584,12 +1584,12 @@ begin
   inherited Destroy;
 end;
 
-function TActorInterfaceForRPC.AllMatcher(Msg: TActorMessage): Boolean;
+function TActorInterfaceForRPC.AllMatcher(Msg: TTuple): Boolean;
 begin
   Result := true;
 end;
 
-procedure TActorInterfaceForRPC.NullAction(Msg: TActorMessage);
+procedure TActorInterfaceForRPC.NullAction(Msg: TTuple);
 begin
 end;
 
@@ -1597,9 +1597,9 @@ procedure TActorInterfaceForRPC.NullThunk;
 begin
 end;
 
-procedure TActorInterfaceForRPC.StoreFirstMessage(Msg: TActorMessage);
+procedure TActorInterfaceForRPC.StoreFirstMessage(Msg: TTuple);
 begin
-  Self.fResult := Msg.Data.Copy as TTuple;
+  Self.fResult := Msg.Copy as TTuple;
 end;
 
 
@@ -1663,34 +1663,34 @@ end;
 
 //* TActor Protected methods ***************************************************
 
-function TActor.FindExit(Msg: TActorMessage): Boolean;
+function TActor.FindExit(Msg: TTuple): Boolean;
 begin
   Result := Self.MatchMessageName(Msg, ExitMsg);
 end;
 
-function TActor.FindKill(Msg: TActorMessage): Boolean;
+function TActor.FindKill(Msg: TTuple): Boolean;
 begin
-  Result := Msg.Data.Count > 1;
+  Result := Msg.Count > 1;
 
   if Result then begin
-    Result := Msg.Data[0].IsString
-           and (TStringTerm(Msg.Data[0]).Value = ExitMsg)
-           and Msg.Data[1].IsString
-           and (TStringTerm(Msg.Data[1]).Value = ExitReasonKill);
+    Result := Msg[0].IsString
+           and (TStringTerm(Msg[0]).Value = ExitMsg)
+           and Msg[1].IsString
+           and (TStringTerm(Msg[1]).Value = ExitReasonKill);
   end;
 end;
 
-function TActor.MatchAny(Msg: TActorMessage): Boolean;
+function TActor.MatchAny(Msg: TTuple): Boolean;
 begin
   Result := true;
 end;
 
-function TActor.MatchMessageName(Msg: TActorMessage; MsgName: String): Boolean;
+function TActor.MatchMessageName(Msg: TTuple; MsgName: String): Boolean;
 var
   O: TMessageTuple;
 begin
   try
-    O := TMessageTuple.Overlay(Msg.Data);
+    O := TMessageTuple.Overlay(Msg);
     try
       Result := O.MessageName = MsgName;
     finally
@@ -1740,12 +1740,12 @@ end;
 
 //* TActor Private methods *****************************************************
 
-procedure TActor.ReactToExit(Msg: TActorMessage);
+procedure TActor.ReactToExit(Msg: TTuple);
 begin
   Self.Terminate;
 end;
 
-procedure TActor.ReactToKill(Msg: TActorMessage);
+procedure TActor.ReactToKill(Msg: TTuple);
 begin
   Self.Terminate;
 end;
