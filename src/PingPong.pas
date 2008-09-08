@@ -158,17 +158,17 @@ begin
   if (Self.NextFibber = '') then
     Self.NextFibber := Spawn(TFibonacciActor);
 
-  AskForNext := TTuple.Create;
+  AskForNext := TMessageTuple.Create(NextName, TActor.RootActor);
   try
-     AskForNext.AddProcessID(TActor.RootActor);
-     AskForNext.AddString(NextName);
-
-    Next := RPC(Self.NextFibber, AskForNext, 100000);
-    try
-      LogToDemo('', Format('Next Fibonacci: %d', [TIntegerTerm(Next[0]).Value]), 0, '', LevelInfo, 0, '');
-    finally
-      Next.Free;
-    end;
+    Next := RPC(Self.NextFibber, AskForNext, 1000);
+    if Assigned(Next) then
+      try
+        LogToDemo('', Format('Next Fibonacci: %d', [TIntegerTerm(Next[0]).Value]), 0, '', LevelInfo, 0, '');
+      finally
+        Next.Free;
+      end
+    else
+      LogToDemo('', 'Timeout waiting for the next Fibonacci', 0, '', LevelInfo, 0, '')
   finally
     AskForNext.Free;
   end;
@@ -319,13 +319,19 @@ end;
 procedure TFibonacciActor.ReturnNextFibonacci(Msg: TActorMessage);
 var
   Answer: TTuple;
+  Request: TMessageTuple;
 begin
-  Answer := TTuple.Create;
+  Request := TMessageTuple.Overlay(Msg);
   try
-    Answer.AddInteger(Self.FibGen.Next);
-    Self.Send(TProcessIDTerm(Msg.Data[0]).Value, Answer);
+    Answer := TTuple.Create;
+    try
+      Answer.AddInteger(Self.FibGen.Next);
+      Self.Send(Request.ReplyTo, Answer);
+    finally
+      Answer.Free;
+    end;
   finally
-    Answer.Free;
+    Request.Free;
   end;
 end;
 
