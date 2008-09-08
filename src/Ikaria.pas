@@ -269,6 +269,7 @@ type
     procedure Send(Target: TProcessID; MsgName: String); overload;
     procedure Send(Target: TProcessID; MsgName: String; Parameters: TTuple); overload;
     procedure Send(Target: TProcessID; T: TTuple); overload;
+    function  Spawn(ActorType: TActorClass): TProcessID;
     function  SpawnLink(ActorType: TActorClass): TProcessID;
 
     property PID:        TProcessID read GetPID;
@@ -293,21 +294,23 @@ type
   // I represent an execution context. I send and receive messages to and from
   // other Actors.
   //
+  // Note that "execution context" doesn't map to an operating system concept:
+  // right now Ikaria uses one thread to run one Actor, but later it might not
+  // use threads - it could use processes, or fibres - or one thread might run several
+  // cooperatively-multitasking Actors.
+  //
   // Also, I provide common matching functions - MatchAny, MatchMessageName,
   // etc. - to my subclasses.
-  TActor = class(TThread)
+  TActor = class(TActorInterface)
   private
-    function  GetPID: TProcessID;
     procedure ReactToExit(Msg: TActorMessage);
     procedure ReactToKill(Msg: TActorMessage);
     procedure RegisterRequiredActions(Table: TActorMessageTable);
     procedure SendExit(Reason: TTuple);
   protected
-    Intf:     TActorInterface;
     MsgTable: TActorMessageTable;
     ParentID: TProcessID;
 
-    procedure Execute; override;
     function  FindExit(Msg: TActorMessage): Boolean;
     function  FindKill(Msg: TActorMessage): Boolean;
     function  MatchAny(Msg: TActorMessage): Boolean;
@@ -316,17 +319,14 @@ type
     procedure Run; virtual;
     procedure SendExceptionalExit(E: Exception);
     procedure SendNormalExit;
-    function  Spawn(ActorType: TActorClass): TProcessID;
-    function  SpawnLink(ActorType: TActorClass): TProcessID;
   public
     class function RootActor: TProcessID;
 
     constructor Create(Parent: TProcessID); virtual;
     destructor  Destroy; override;
 
+    procedure Execute;
     procedure Terminate; reintroduce; virtual;
-
-    property PID: TProcessID read GetPID;
   end;
 
   TThunkActor = class(TActor)
@@ -339,6 +339,19 @@ type
   end;
 
   TRootActor = class(TActor)
+  end;
+
+  // Given an instantiated Actor, I run the Actor in a separate thread. When I
+  // terminate (or rather, when the Actor signals its completion by returning
+  // from its Execute method), I destroy the Actor.
+  TActorRunner = class(TThread)
+  private
+    Actor: TActor;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(A: TActor);
+    destructor  Destroy; override;
   end;
 
   EActorException = class(Exception);
@@ -569,6 +582,16 @@ begin
   end;
 end;
 
+function PrimitiveSpawn(ActorType: TActorClass; Parent: TProcessID): TProcessID;
+var
+  A: TActor;
+begin
+  A := ActorType.Create(Parent);
+  Result := A.PID;
+
+  TActorRunner.Create(A);
+end;
+
 procedure PrimitiveUnregisterActor(A: TActorMailbox);
 var
   Index: Integer;
@@ -645,23 +668,22 @@ begin
 end;
 
 function Spawn(ActorType: TActorClass): TProcessID;
-var
-  A: TActor;
 begin
-  A := ActorType.Create(TActor.RootActor);
-  Result := A.PID;
-  A.Resume;
+  Result := PrimitiveSpawn(ActorType, TActor.RootActor);
 end;
 
 function Spawn(T: TThunk): TProcessID;
 var
   Thunker: TThunkActor;
 begin
+  // This needs to hook into the Primitive layer.
+
   Thunker := TThunkActor.Create(TActor.RootActor);
   Thunker.Thunk := T;
 
   Result := Thunker.PID;
-  Thunker.Resume;
+
+  TActorRunner.Create(Thunker);
 end;
 
 //******************************************************************************
@@ -1482,16 +1504,22 @@ begin
   PrimitiveSend(Self.Mailbox.PID, Target, T);
 end;
 
+function TActorInterface.Spawn(ActorType: TActorClass): TProcessID;
+begin
+  Result := PrimitiveSpawn(ActorType, Self.PID);
+end;
+
 function TActorInterface.SpawnLink(ActorType: TActorClass): TProcessID;
 var
   A: TActor;
 begin
+  // This needs to hook into the Primitive layer.
   A := ActorType.Create(Self.PID);
   Self.Link(A.PID);
 
   Result := A.PID;
 
-  A.Resume;
+  TActorRunner.Create(A);
 end;
 
 //* TActorInterface Private methods ********************************************
@@ -1582,7 +1610,7 @@ begin
   try
     if not Assigned(Root) then begin
       Root := TRootActor.Create('');
-      Root.Resume;
+      TActorRunner.Create(Root);
     end;
 
     Result := Root.PID;
@@ -1593,13 +1621,9 @@ end;
 
 constructor TActor.Create(Parent: TProcessID);
 begin
-  inherited Create(true);
-
-  Self.FreeOnTerminate := true;
+  inherited Create;
 
   Self.ParentID := Parent;
-
-  Self.Intf := TActorInterface.Create;
 
   Self.MsgTable := TActorMessageTable.Create;
   Self.RegisterRequiredActions(Self.MsgTable);
@@ -1613,19 +1637,9 @@ begin
   // Notify all known actors of freeing!
 
   Self.MsgTable.Free;
-  Self.Intf.Free;
 
   inherited Destroy;
 end;
-
-procedure TActor.Terminate;
-begin
-  Self.Intf.Terminated := true;
-
-  inherited Terminate;
-end;
-
-//* TActor Protected methods ***************************************************
 
 procedure TActor.Execute;
 begin
@@ -1637,6 +1651,13 @@ begin
       Self.SendExceptionalExit(E);
   end;
 end;
+
+procedure TActor.Terminate;
+begin
+  Self.Terminated := true;
+end;
+
+//* TActor Protected methods ***************************************************
 
 function TActor.FindExit(Msg: TActorMessage): Boolean;
 begin
@@ -1684,7 +1705,7 @@ end;
 procedure TActor.Run;
 begin
   while not Self.Terminated do
-    Self.Intf.Receive(Self.MsgTable);
+    Self.Receive(Self.MsgTable);
 end;
 
 procedure TActor.SendExceptionalExit(E: Exception);
@@ -1713,28 +1734,7 @@ begin
   end;
 end;
 
-function TActor.Spawn(ActorType: TActorClass): TProcessID;
-var
-  A: TActor;
-begin
-  A := ActorType.Create(Self.PID);
-
-  Result := A.PID;
-
-  A.Resume;
-end;
-
-function TActor.SpawnLink(ActorType: TActorClass): TProcessID;
-begin
-  Result := Self.Intf.SpawnLink(ActorType);
-end;
-
 //* TActor Private methods *****************************************************
-
-function TActor.GetPID: TProcessID;
-begin
-  Result := Self.Intf.PID;
-end;
 
 procedure TActor.ReactToExit(Msg: TActorMessage);
 begin
@@ -1764,8 +1764,8 @@ var
 begin
   Exit := TMessageTuple.Create(ExitMsg, Self.PID, Reason);
   try
-    for I := 0 to Self.Intf.Mailbox.LinkSet.Count - 1 do
-      Self.Intf.Send(Self.Intf.Mailbox.LinkSet[I], ExitMsg, Reason);
+    for I := 0 to Self.Mailbox.LinkSet.Count - 1 do
+      Self.Send(Self.Mailbox.LinkSet[I], ExitMsg, Reason);
 
     NotifyOfActorExit(Self.PID, Exit);
   finally
@@ -1781,6 +1781,35 @@ end;
 procedure TThunkActor.Run;
 begin
   Self.Thunk;
+end;
+
+//******************************************************************************
+//* TActorRunner                                                               *
+//******************************************************************************
+//* TActorRunner Public methods ************************************************
+
+constructor TActorRunner.Create(A: TActor);
+begin
+  inherited Create(true);
+
+  Self.Actor           := A;
+  Self.FreeOnTerminate := true;
+
+  Self.Resume;
+end;
+
+destructor TActorRunner.Destroy;
+begin
+  Self.Actor.Free;
+
+  inherited Destroy;
+end;
+
+//* TActorRunner Protected methods *********************************************
+
+procedure TActorRunner.Execute;
+begin
+  Self.Actor.Execute;
 end;
 
 initialization

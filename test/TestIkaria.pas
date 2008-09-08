@@ -405,7 +405,7 @@ end;
 
 procedure TEchoActor.EchoMessage(Msg: TActorMessage);
 begin
-  Self.Intf.Send(TProcessIDTerm(Msg.Data[1]).Value, Msg.Data);
+  Self.Send(TProcessIDTerm(Msg.Data[1]).Value, Msg.Data);
 end;
 
 //******************************************************************************
@@ -442,7 +442,7 @@ end;
 
 procedure TSingleShotActor.Run;
 begin
-  Self.Intf.Send(Self.ParentID, 'ping');
+  Self.Send(Self.ParentID, 'ping');
 end;
 
 //******************************************************************************

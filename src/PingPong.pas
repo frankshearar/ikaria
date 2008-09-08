@@ -205,7 +205,7 @@ end;
 
 procedure TPingActor.Ping(PID: TProcessID);
 begin
-  Self.Intf.Send(PID, PingName);
+  Self.Send(PID, PingName);
 end;
 
 procedure TPingActor.ReactToPong(Msg: TActorMessage);
@@ -244,7 +244,7 @@ end;
 
 procedure TPongActor.Pong(PID: TProcessID);
 begin
-  Self.Intf.Send(PID, PongName);
+  Self.Send(PID, PongName);
 end;
 
 procedure TPongActor.ReactToPing(Msg: TActorMessage);
@@ -323,7 +323,7 @@ begin
   Answer := TTuple.Create;
   try
     Answer.AddInteger(Self.FibGen.Next);
-    Self.Intf.Send(TProcessIDTerm(Msg.Data[0]).Value, Answer);
+    Self.Send(TProcessIDTerm(Msg.Data[0]).Value, Answer);
   finally
     Answer.Free;
   end;

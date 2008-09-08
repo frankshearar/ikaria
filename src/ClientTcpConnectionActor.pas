@@ -196,12 +196,12 @@ end;
 
 procedure TClientTcpConnectionActor.SignalClosureTo(Target: TProcessID);
 begin
-  Self.Intf.Send(Target, ClosedConnectionMsg);
+  Self.Send(Target, ClosedConnectionMsg);
 end;
 
 procedure TClientTcpConnectionActor.SignalOpeningTo(Target: TProcessID);
 begin
-  Self.Intf.Send(Target, ConnectedMsg);
+  Self.Send(Target, ConnectedMsg);
 end;
 
 end.
