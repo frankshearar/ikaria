@@ -13,7 +13,7 @@ interface
 
 uses
   ClientTcpConnectionActor, IdTcpServer, Ikaria, SyncObjs, TestIkaria,
-  TestFramework;
+  TestFramework, Windows;
 
 type
   TestTClientTcpConnectionActor = class(TActorTestCase)
@@ -21,26 +21,38 @@ type
     CloseConnection: TMessageTuple;
     Closed:          Boolean;
     Connected:       Boolean;
-    Connection:      TProcessID;
+    Connection:      TClientTcpConnectionActor;
     ConnectionCount: Integer;
-    ConnectTo:       TConnectMsg;
+    ConnectTo:       TOpenMsg;
     ConnEvent:       TEvent;
     DisconEvent:     TEvent;
+    Disconnected:    Boolean;
+    Error:           String;
+    LastClientPort:  Integer;
     Location:        TLocationTuple;
+    ReceivedData:    String;
     RPC:             TActorInterface;
+    SendData:        TSendDataMsg;
+    SendEvent:       TEvent;
     Server:          TIdTcpServer;
+    TestData:        String;
+    TestTable:       TActorMessageTable;
     TimedOut:        Boolean;
 
-    function  ClientCountOf(S: TIdTcpServer): Integer;
-    procedure CountConnections(Thread: TIdPeerThread);
-    procedure DoNothing(Thread: TIdPeerThread);
+    procedure AckConnection(Thread: TIdPeerThread);
+    procedure CollectTestData(Thread: TIdPeerThread);
+    procedure Connect;
+    procedure Disconnect;
     function  FindClosed(Msg: TTuple): Boolean;
     function  FindConnected(Msg: TTuple): Boolean;
-    procedure MarkClosed(Msg: TTuple);
+    function  FindReceivedData(Msg: TTuple): Boolean;
     procedure MarkConnected(Msg: TTuple);
+    procedure MarkClosed(Msg: TTuple);
     function  MatchMessageName(Msg: TTuple; Name: String): Boolean;
-    procedure OnDisconnect(Thread: TIdPeerThread);
+    procedure ServerSend(S: String);
+    procedure StoreReceivedData(Msg: TTuple);
     procedure Timeout;
+    procedure WaitFor(E: TEvent; Timeout: Cardinal; Msg: String);
     procedure WaitForTimeout(E: TEvent; Timeout: Cardinal; Msg: String);
   public
     procedure SetUp; override;
@@ -49,8 +61,10 @@ type
     procedure TestClose;
     procedure TestCloseSendsClosedMessage;
     procedure TestConnect;
-    procedure TestConnectSendsConnectedMessage;
+    procedure TestDoubleClose;
     procedure TestDoubleConnect;
+    procedure TestReceivedData;
+    procedure TestSendData;
   end;
 
 const
@@ -60,7 +74,7 @@ const
 implementation
 
 uses
-  Classes, SysUtils;
+  Classes, Forms, Messages, SysUtils, IdTCPConnection;
 
 function Suite: ITestSuite;
 begin
@@ -79,35 +93,47 @@ begin
 
   Self.ConnEvent   := TSimpleEvent.Create;
   Self.DisconEvent := TSimpleEvent.Create;
-  Self.Connected       := false;
-  Self.ConnectionCount := 0;
+  Self.SendEvent   := TSimpleEvent.Create;
+  Self.TestData    := 'test data';
 
-  Self.Server    := TIdTcpServer.Create(nil);
-  Self.Server.OnConnect    := Self.CountConnections;
-  Self.Server.OnDisconnect := Self.OnDisconnect;
-  Self.Server.OnExecute    := Self.DoNothing;
-  Self.Server.Bindings.Add;
-  Self.Server.Bindings[0].IP   := '127.0.0.1';
-  Self.Server.Bindings[0].Port := 8000;
+  Self.Server := TIdTcpServer.Create(nil);
+  Self.Server.OnExecute := Self.AckConnection;
+
+  Self.Server.DefaultPort := 8000;
   Self.Server.Active := true;
 
-  Self.Location        := TLocationTuple.Create(Self.Server.Bindings[0].IP, Self.Server.Bindings[0].Port, 'TCP');
-  Self.RPC             := TActorInterface.Create;
-  Self.ConnectTo       := TConnectMsg.Create(Self.RPC.PID, Self.Location);
-  Self.CloseConnection := TMessageTuple.Create(CloseConnectionMsg, Self.RPC.PID);
+  Self.TestTable := TActorMessageTable.Create;
+  Self.TestTable.Add(Self.FindClosed, Self.MarkClosed);
+  Self.TestTable.Add(Self.FindConnected, Self.MarkConnected);
+  Self.TestTable.Add(Self.FindReceivedData, Self.StoreReceivedData);
 
-  Self.Connection := Spawn(TClientTcpConnectionActor);
-  Self.TimedOut   := false;
+  Self.Location        := TLocationTuple.Create('localhost', Self.Server.DefaultPort, 'TCP');
+  Self.RPC             := TActorInterface.Create;
+  Self.ConnectTo       := TOpenMsg.Create(Self.RPC.PID, Self.Location);
+  Self.CloseConnection := TMessageTuple.Create(CloseConnectionMsg, Self.RPC.PID);
+  Self.SendData        := TSendDataMsg.Create(Self.RPC.PID, Self.TestData);
+
+  Self.Connection := TClientTcpConnectionActor.Create(TActor.RootActor);
+
+  Self.Closed          := false;
+  Self.Connected       := false;
+  Self.ConnectionCount := 0;
+  Self.Disconnected    := false;
+  Self.LastClientPort  := 0;
+  Self.TimedOut        := false;
 end;
 
 procedure TestTClientTcpConnectionActor.TearDown;
 begin
-  Kill(Self.Connection);
+  Self.Connection.Free;
+  Self.SendData.Free;
   Self.CloseConnection.Free;
   Self.ConnectTo.Free;
   Self.RPC.Free;
   Self.Location.Free;
+  Self.TestTable.Free;
   Self.Server.Free;
+  Self.SendEvent.Free;
   Self.DisconEvent.Free;
   Self.ConnEvent.Free;
 
@@ -116,27 +142,59 @@ end;
 
 //* TestTClientTcpConnectionActor Private methods ******************************
 
-function TestTClientTcpConnectionActor.ClientCountOf(S: TIdTcpServer): Integer;
-var
-  L: TList;
+procedure TestTClientTcpConnectionActor.AckConnection(Thread: TIdPeerThread);
 begin
-  L := S.Threads.LockList;
-  try
-    Result := L.Count;
-  finally
-    S.Threads.UnlockList;
+  // Here I thought this callback ran just once per connection, but it's running
+  // a metric kajillion times per connection. Thus, LastClientPort allows us to
+  // set ConnEvent ONCE per unique connection (almost).
+
+  if (Thread.Connection.Socket.Binding.PeerPort <> Self.LastClientPort) then begin
+    Self.LastClientPort := Thread.Connection.Socket.Binding.PeerPort;
+    Self.ConnEvent.SetEvent;
   end;
 end;
 
-procedure TestTClientTcpConnectionActor.CountConnections(Thread: TIdPeerThread);
+procedure TestTClientTcpConnectionActor.CollectTestData(Thread: TIdPeerThread);
+var
+  S: TStringStream;
 begin
-//  Self.Connected := true;
-  Inc(Self.ConnectionCount);
   Self.ConnEvent.SetEvent;
+
+  S := TStringStream.Create('');
+  try
+    while (Self.ReceivedData = '') do begin
+      Thread.Connection.ReadFromStack(true, OneSecond, false);
+      S.CopyFrom(Thread.Connection.InputBuffer, 0);
+      Thread.Connection.InputBuffer.Remove(Thread.Connection.InputBuffer.Size);
+
+      Self.ReceivedData := Self.ReceivedData + S.DataString;
+    end;
+  finally
+    S.Free;
+  end;
+
+  Self.SendEvent.SetEvent;
 end;
 
-procedure TestTClientTcpConnectionActor.DoNothing(Thread: TIdPeerThread);
+procedure TestTClientTcpConnectionActor.Connect;
 begin
+  Self.Connection.Connect(Self.ConnectTo);
+  Self.WaitFor(Self.ConnEvent, OneSecond, 'Timed out waiting for server to accept connection');
+  Self.RPC.Receive(Self.TestTable, OneSecond, Self.Timeout);
+  Check(not Self.TimedOut, 'Timed out waiting to open connection');
+  Check(not Self.Closed, 'Connection closed');
+  CheckEquals('', Self.Error, 'Error connecting');
+
+  Self.WaitFor(Self.ConnEvent, OneSecond, 'Timed out waiting for connection');
+end;
+
+procedure TestTClientTcpConnectionActor.Disconnect;
+begin
+  Self.Connection.Close(Self.CloseConnection);
+
+  Self.TimedOut := false;
+  Self.RPC.Receive(Self.FindClosed, Self.MarkClosed, OneSecond, Self.Timeout);
+  Check(not Self.TimedOut, Format('Timeout waiting for %s message', [ClosedConnectionMsg]));
 end;
 
 function TestTClientTcpConnectionActor.FindClosed(Msg: TTuple): Boolean;
@@ -146,7 +204,12 @@ end;
 
 function TestTClientTcpConnectionActor.FindConnected(Msg: TTuple): Boolean;
 begin
-  Result := Self.MatchMessageName(Msg, ConnectedMsg);
+  Result := Self.MatchMessageName(Msg, OpenedMsg);
+end;
+
+function TestTClientTcpConnectionActor.FindReceivedData(Msg: TTuple): Boolean;
+begin
+  Result := Self.MatchMessageName(Msg, ReceivedDataMsg);
 end;
 
 procedure TestTClientTcpConnectionActor.MarkClosed(Msg: TTuple);
@@ -155,8 +218,18 @@ begin
 end;
 
 procedure TestTClientTcpConnectionActor.MarkConnected(Msg: TTuple);
+var
+  O: TMessageTuple;
 begin
   Self.Connected := true;
+
+  O := TMessageTuple.Overlay(Msg);
+  try
+    if (O.Parameters.Count > 0) then
+      Self.Error := (O.Parameters[0] as TStringTerm).Value;
+  finally
+    O.Free;
+  end;
 end;
 
 function TestTClientTcpConnectionActor.MatchMessageName(Msg: TTuple; Name: String): Boolean;
@@ -175,14 +248,41 @@ begin
   end;
 end;
 
-procedure TestTClientTcpConnectionActor.OnDisconnect(Thread: TIdPeerThread);
+procedure TestTClientTcpConnectionActor.ServerSend(S: String);
+var
+  I: Integer;
+  L: TList;
 begin
-  Self.DisconEvent.SetEvent;
+  L := Self.Server.Threads.LockList;
+  try
+    for I := 0 to L.Count - 1 do
+      TIdPeerThread(L[I]).Connection.Write(S);
+  finally
+    Self.Server.Threads.UnlockList;
+  end;
+end;
+
+procedure TestTClientTcpConnectionActor.StoreReceivedData(Msg: TTuple);
+var
+  O: TMessageTuple;
+begin
+  O := TMessageTuple.Overlay(Msg);
+  try
+    Self.ReceivedData := (O.Parameters[0] as TStringTerm).Value;
+  finally
+    O.Free;
+  end;
 end;
 
 procedure TestTClientTcpConnectionActor.Timeout;
 begin
   Self.TimedOut := true;
+end;
+
+procedure TestTClientTcpConnectionActor.WaitFor(E: TEvent; Timeout: Cardinal; Msg: String);
+begin
+  if (wrSignaled <> E.WaitFor(Timeout)) then
+    Fail(Msg);
 end;
 
 procedure TestTClientTcpConnectionActor.WaitForTimeout(E: TEvent; Timeout: Cardinal; Msg: String);
@@ -194,66 +294,74 @@ end;
 //* TestTClientTcpConnectionActor Published methods ****************************
 
 procedure TestTClientTcpConnectionActor.TestClose;
-var
-  ClientCount: Integer;
 begin
-  Self.RPC.Send(Self.Connection, Self.ConnectTo);
+  Self.Connect;
 
-  Self.RPC.Receive(Self.FindConnected, Self.MarkConnected, OneSecond, Self.Timeout);
-  Check(not Self.TimedOut, Format('Timeout waiting for %s message', [ConnectedMsg]));
+  Self.Disconnect;
 
-  ClientCount := Self.ClientCountOf(Self.Server);
-
-  Self.TimedOut := false;
-  Self.RPC.Send(Self.Connection, Self.CloseConnection);
-
-  Self.RPC.Receive(Self.FindClosed, Self.MarkClosed, OneSecond, Self.Timeout);
-  Check(not Self.TimedOut, Format('Timeout waiting for %s message', [ClosedConnectionMsg]));
-
-  Check(ClientCount > Self.ClientCountOf(Self.Server), 'Connection not closed');
+  Check(not Self.Connection.Connected, 'Connection not closed');
 end;
 
 procedure TestTClientTcpConnectionActor.TestCloseSendsClosedMessage;
 begin
-  Self.RPC.Send(Self.Connection, Self.ConnectTo);
+  Self.Connect;
 
-  Self.RPC.Receive(Self.FindConnected, Self.MarkConnected, OneSecond, Self.Timeout);
-  Check(not Self.TimedOut, Format('Timeout waiting for %s message', [ConnectedMsg]));
-  Check(Self.Connected, Format('No %s message received', [ConnectedMsg]));
+  Self.Disconnect;
 
-  Self.RPC.Send(Self.Connection, Self.CloseConnection);
-
-  Self.TimedOut := false;
-  Self.RPC.Receive(Self.FindClosed, Self.MarkClosed, OneSecond, Self.Timeout);
-  Check(not Self.TimedOut, Format('Timeout waiting for %s message', [ClosedConnectionMsg]));
   Check(Self.Closed, Format('No %s message received', [ClosedConnectionMsg]));
 end;
 
 procedure TestTClientTcpConnectionActor.TestConnect;
 begin
-  SendActorMessage(Self.Connection, Self.ConnectTo);
-  Self.WaitFor(Self.ConnEvent, DefaultTimeout, 'No connection attempt');
+  Self.Connect;
 end;
 
-procedure TestTClientTcpConnectionActor.TestConnectSendsConnectedMessage;
+procedure TestTClientTcpConnectionActor.TestDoubleClose;
 begin
-  Self.RPC.Send(Self.Connection, Self.ConnectTo);
+  // Check that calling disconnect twice does nothing.
 
-  Self.RPC.Receive(Self.FindConnected, Self.MarkConnected, OneSecond, Self.Timeout);
-  Check(not Self.TimedOut, Format('Timeout waiting for %s message', [ConnectedMsg]));
-  Check(Self.Connected, Format('No %s message received', [ConnectedMsg]));
+  Self.Connect;
+  Self.Disconnect;
+
+  Self.Connection.Close(Self.CloseConnection);
+  Self.TimedOut := false;
+  Self.RPC.Receive(Self.FindClosed, Self.MarkClosed, OneSecond, Self.Timeout);
+  Check(Self.TimedOut, Format('Received a %s message', [ClosedConnectionMsg]));
 end;
 
 procedure TestTClientTcpConnectionActor.TestDoubleConnect;
 begin
-  SendActorMessage(Self.Connection, Self.ConnectTo);
-  Self.WaitFor(Self.ConnEvent, DefaultTimeout, 'No connection attempt');
-  Self.ConnEvent.ResetEvent;
+  Self.Connect;
 
-  // "Reconnecting" should do nothing.
-  SendActorMessage(Self.Connection, Self.ConnectTo);
-  Self.WaitForTimeout(Self.ConnEvent, DefaultTimeout, 'Reconnection attempt');
-  CheckEquals(1, Self.ConnectionCount, 'Actor tried to reconnect');
+  Self.ConnEvent.ResetEvent;
+  Self.Connection.Connect(Self.ConnectTo);
+  Self.WaitForTimeout(Self.ConnEvent, OneSecond, 'Server accepted another connection');
+end;
+
+procedure TestTClientTcpConnectionActor.TestReceivedData;
+begin
+  Self.Connect;
+
+  Self.ServerSend(Self.TestData);
+
+  Self.Connection.ReceiveData(OneSecond);
+
+  Self.RPC.Receive(Self.FindReceivedData, Self.StoreReceivedData, OneSecond, Self.Timeout);
+  Check(not Self.TimedOut, 'Timed out waiting for data');
+  CheckEquals(Self.TestData, Self.ReceivedData, 'Incorrect data received');
+end;
+
+procedure TestTClientTcpConnectionActor.TestSendData;
+begin
+  Self.Server.OnExecute := Self.CollectTestData;
+
+  Self.Connect;
+
+  Self.Connection.SendData(Self.SendData);
+
+  Self.WaitFor(Self.SendEvent, OneSecond, 'Waiting for sent data to arrive');
+
+  CheckEquals(Self.TestData, Self.ReceivedData, 'Data not sent');
 end;
 
 initialization;
