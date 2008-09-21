@@ -246,11 +246,14 @@ type
     procedure NewMessageArrived(Sender: TObject);
     procedure NullThunk;
     function  WaitForMessage(Timeout: Cardinal): Boolean;
+  protected
+    procedure DoNothing(Msg: TTuple);
   public
     constructor Create;
     destructor  Destroy; override;
 
     procedure Link(PID: TProcessID);
+    function  MatchMessageName(Msg: TTuple; MsgName: String): Boolean;
     procedure Receive(Matching: TMessageFinder;
                       Action: TActOnMessage); overload;
     procedure Receive(Matching: TMessageFinder;
@@ -286,6 +289,7 @@ type
     function  AllMatcher(Msg: TTuple): Boolean;
     procedure NullAction(Msg: TTuple);
     procedure NullThunk;
+    procedure Reset;
     procedure StoreFirstMessage(Msg: TTuple);
 
     property Result: TTuple read fResult;
@@ -314,7 +318,6 @@ type
     function  FindExit(Msg: TTuple): Boolean;
     function  FindKill(Msg: TTuple): Boolean;
     function  MatchAny(Msg: TTuple): Boolean;
-    function  MatchMessageName(Msg: TTuple; MsgName: String): Boolean;
     procedure RegisterActions(Table: TActorMessageTable); virtual;
     procedure Run; virtual;
     procedure SendExceptionalExit(E: Exception);
@@ -1407,6 +1410,22 @@ begin
   Self.Mailbox.Link(PID);
 end;
 
+function TActorInterface.MatchMessageName(Msg: TTuple; MsgName: String): Boolean;
+var
+  O: TMessageTuple;
+begin
+  try
+    O := TMessageTuple.Overlay(Msg);
+    try
+      Result := O.MessageName = MsgName;
+    finally
+      O.Free;
+    end;
+  except
+    Result := false;
+  end;
+end;
+
 procedure TActorInterface.Receive(Matching: TMessageFinder;
                                   Action: TActOnMessage);
 var
@@ -1526,6 +1545,12 @@ begin
   Result := PrimitiveSpawnLink(ActorType, Self.PID);
 end;
 
+//* TActorInterface Protected methods ******************************************
+
+procedure TActorInterface.DoNothing(Msg: TTuple);
+begin
+end;
+
 //* TActorInterface Private methods ********************************************
 
 function TActorInterface.GetPID: TProcessID;
@@ -1600,8 +1625,18 @@ procedure TActorInterfaceForRPC.NullThunk;
 begin
 end;
 
+procedure TActorInterfaceForRPC.Reset;
+begin
+  if Assigned(Self.fResult) then begin
+    Self.fResult.Free;
+    Self.fResult := nil;
+  end;
+end;
+
 procedure TActorInterfaceForRPC.StoreFirstMessage(Msg: TTuple);
 begin
+  Self.Reset;
+    
   Self.fResult := Msg.Copy as TTuple;
 end;
 
@@ -1686,22 +1721,6 @@ end;
 function TActor.MatchAny(Msg: TTuple): Boolean;
 begin
   Result := true;
-end;
-
-function TActor.MatchMessageName(Msg: TTuple; MsgName: String): Boolean;
-var
-  O: TMessageTuple;
-begin
-  try
-    O := TMessageTuple.Overlay(Msg);
-    try
-      Result := O.MessageName = MsgName;
-    finally
-      O.Free;
-    end;
-  except
-    Result := false;
-  end;
 end;
 
 procedure TActor.RegisterActions(Table: TActorMessageTable);

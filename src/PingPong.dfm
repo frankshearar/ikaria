@@ -48,6 +48,31 @@ object PingPongDemo: TPingPongDemo
       TabOrder = 2
       OnClick = NextFibClick
     end
+    object NumProcs: TEdit
+      Left = 232
+      Top = 2
+      Width = 33
+      Height = 21
+      TabOrder = 3
+      Text = '1'
+    end
+    object NumLoops: TEdit
+      Left = 264
+      Top = 2
+      Width = 33
+      Height = 21
+      TabOrder = 4
+      Text = '1'
+    end
+    object RingBenchmark: TButton
+      Left = 298
+      Top = 0
+      Width = 84
+      Height = 25
+      Caption = 'Ring Benchmark'
+      TabOrder = 5
+      OnClick = RingBenchmarkClick
+    end
   end
   object Log: TMemo
     Left = 0

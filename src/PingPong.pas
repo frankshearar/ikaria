@@ -23,9 +23,13 @@ type
     Log: TMemo;
     StopPing: TButton;
     NextFib: TButton;
+    NumProcs: TEdit;
+    NumLoops: TEdit;
+    RingBenchmark: TButton;
     procedure StartPingClick(Sender: TObject);
     procedure StopPingClick(Sender: TObject);
     procedure NextFibClick(Sender: TObject);
+    procedure RingBenchmarkClick(Sender: TObject);
   private
     NextFibber: TProcessID;
     Pinger:     TProcessID;
@@ -76,6 +80,36 @@ type
   public
     constructor Create(Parent: TProcessID); override;
     destructor  Destroy; override;
+  end;
+
+  TRingBenchmark = class(TActor)
+  private
+    Caller:   TProcessID;
+    First:    TProcessID;
+    NumProcs: Integer;
+    NumLoops: Integer;
+
+    function  FindFinished(Msg: TTuple): Boolean;
+    function  FindGo(Msg: TTuple): Boolean;
+    function  FindSetup(Msg: TTuple): Boolean;
+    function  FindTick(Msg: TTuple): Boolean;
+    procedure RunBenchmark(Msg: TTuple);
+    procedure Setup(Msg: TTuple);
+    procedure SignalSetupFinished(Msg: TTuple);
+  protected
+    procedure RegisterActions(Table: TActorMessageTable); override;
+  end;
+
+  TForwarder = class(TActor)
+  private
+    Next: TProcessID;
+
+    function  FindSetup(Msg: TTuple): Boolean;
+    function  FindTick(Msg: TTuple): Boolean;
+    procedure ForwardTick(Msg: TTuple);
+    procedure Setup(Msg: TTuple);
+  protected
+    procedure RegisterActions(Table: TActorMessageTable); override;
   end;
 
 var
@@ -149,6 +183,54 @@ begin
 end;
 
 //* TPingPongDemo Published methods ********************************************
+
+procedure TPingPongDemo.RingBenchmarkClick(Sender: TObject);
+var
+  Intf:   TActorInterfaceForRPC;
+  Params: TTuple;
+  RB:     TProcessID;
+  Start,
+  Stop:   TDateTime;
+begin
+  // PRECONDITION: NumProcs.Text, NumLoops.Text contain positive integers.
+
+  RB := Spawn(TRingBenchmark);
+  try
+    Intf := TActorInterfaceForRPC.Create;
+    Params := TTuple.Create;
+    try
+      Params.AddInteger(StrToInt(Self.NumProcs.Text));
+      Params.AddInteger(StrToInt(Self.NumLoops.Text));
+
+      Start := Now;
+
+      Intf.Send(RB, 'setup', Params);
+      Intf.Receive(Intf.AllMatcher, Intf.StoreFirstMessage, 10*OneSecond);
+      if Assigned(Intf.Result) then begin
+        Stop := Now;
+        LogToDemo('', Format('Ring benchmark: Setup time: %s', [FormatDateTime('hh:mm:ss.zzz', Stop - Start)]), 0, '', LevelInfo, 0, '');
+      end
+      else
+        LogToDemo('', 'Ring benchmark: Timed out waiting for setup', 0, '', LevelInfo, 0, '');
+    finally
+      Params.Free;
+    end;
+
+    Start := Now;
+
+    Intf.Reset;
+    Intf.Send(RB, 'go');
+    Intf.Receive(Intf.AllMatcher, Intf.StoreFirstMessage, 10*OneSecond);
+    if Assigned(Intf.Result) then begin
+      Stop := Now;
+      LogToDemo('', Format('Ring benchmark: Run time: %s', [FormatDateTime('hh:mm:ss.zzz', Stop - Start)]), 0, '', LevelInfo, 0, '');
+    end
+    else
+      LogToDemo('', 'Ring benchmark: Timed out waiting for run', 0, '', LevelInfo, 0, '');
+  finally
+    Kill(RB);
+  end;
+end;
 
 procedure TPingPongDemo.NextFibClick(Sender: TObject);
 var
@@ -332,6 +414,145 @@ begin
     end;
   finally
     Request.Free;
+  end;
+end;
+
+//******************************************************************************
+//* TRingBenchmark                                                             *
+//******************************************************************************
+//* TRingBenchmark Protected methods *******************************************
+
+procedure TRingBenchmark.RegisterActions(Table: TActorMessageTable);
+begin
+  Table.Add(Self.FindGo, Self.RunBenchmark);
+  Table.Add(Self.FindSetup, Self.Setup);
+  Table.Add(Self.FindFinished, Self.SignalSetupFinished);
+end;
+
+//* TRingBenchmark Private methods *********************************************
+
+function TRingBenchmark.FindFinished(Msg: TTuple): Boolean;
+begin
+  Result := Self.MatchMessageName(Msg, 'finished');
+end;
+
+function TRingBenchmark.FindGo(Msg: TTuple): Boolean;
+begin
+  Result := Self.MatchMessageName(Msg, 'go');
+end;
+
+function TRingBenchmark.FindSetup(Msg: TTuple): Boolean;
+begin
+  Result := Self.MatchMessageName(Msg, 'setup')
+end;
+
+function TRingBenchmark.FindTick(Msg: TTuple): Boolean;
+begin
+  Result := Self.MatchMessageName(Msg, 'tick')
+end;
+
+procedure TRingBenchmark.RunBenchmark(Msg: TTuple);
+var
+  I: Integer;
+begin
+  for I := 1 to Self.NumLoops do begin
+    Self.Send(Self.First, 'tick');
+    Self.Receive(Self.FindTick, Self.DoNothing);
+  end;
+
+  Self.Send(Self.Caller, 'gone');
+end;
+
+procedure TRingBenchmark.Setup(Msg: TTuple);
+var
+  Params:      TMessageTuple;
+  SetupParams: TTuple;
+begin
+  Params := TMessageTuple.Overlay(Msg);
+  try
+    Self.Caller   := Params.ReplyTo;
+    Self.NumProcs := (Params.Parameters[0] as TIntegerTerm).Value;
+    Self.NumLoops := (Params.Parameters[1] as TIntegerTerm).Value;
+  finally
+    Params.Free;
+  end;
+
+  Self.First := Self.SpawnLink(TForwarder);
+
+  // ("setup" {sender} ({benchmark_pid} N))
+  SetupParams := TTuple.Create;
+  try
+    SetupParams.AddProcessID(Self.PID);
+    SetupParams.AddInteger(NumProcs - 1);
+    Self.Send(Self.First, 'setup', SetupParams);
+  finally
+    SetupParams.Free;
+  end;
+end;
+
+procedure TRingBenchmark.SignalSetupFinished(Msg: TTuple);
+begin
+  Self.Send(Self.Caller, 'finished-setup');
+end;
+
+//******************************************************************************
+//* TForwarder                                                                 *
+//******************************************************************************
+//* TForwarder Protected methods ***********************************************
+
+procedure TForwarder.RegisterActions(Table: TActorMessageTable);
+begin
+  Table.Add(Self.FindSetup, Self.Setup);
+  Table.Add(Self.FindTick, Self.ForwardTick);
+end;
+
+//* TForwarder Private methods *************************************************
+
+function TForwarder.FindSetup(Msg: TTuple): Boolean;
+begin
+  Result := Self.MatchMessageName(Msg, 'setup');
+end;
+
+function TForwarder.FindTick(Msg: TTuple): Boolean;
+begin
+  Result := Self.MatchMessageName(Msg, 'tick');
+end;
+
+procedure TForwarder.ForwardTick(Msg: TTuple);
+begin
+  Self.Send(Self.Next, 'tick');
+end;
+
+procedure TForwarder.Setup(Msg: TTuple);
+var
+  N:           Integer;
+  Params:      TMessageTuple;
+  SetupParams: TTuple;
+begin
+  Params := TMessageTuple.Overlay(Msg);
+  try
+    N := (Params.Parameters[1] as TIntegerTerm).Value;
+
+    if (N = 0) then begin
+      // Close the ring.
+      Self.Next := (Params.Parameters[0] as TProcessIDTerm).Value;
+      Self.Send(Self.Next, 'finished');
+    end
+    else begin
+      Self.Next := Self.SpawnLink(TForwarder);
+
+      // ("setup" {self} ({ring_benchmark_pid} N))
+      SetupParams := TTuple.Create;
+      try
+        SetupParams.Add(Params.Parameters[0]);
+        SetupParams.AddInteger(N - 1);
+        Self.Send(Self.Next, 'setup', SetupParams);
+      finally
+        SetupParams.Free;
+      end;
+    end;
+  finally
+    Params.Free;
   end;
 end;
 
