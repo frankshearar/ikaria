@@ -299,7 +299,7 @@ end;
 
 procedure TPingActor.Run;
 begin
-  Self.Ponger := Self.Spawn(TPongActor);
+  Self.Ponger := Self.SpawnLink(TPongActor);
   Self.Ping(Self.Ponger);
 
   inherited Run;
