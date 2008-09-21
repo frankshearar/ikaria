@@ -1563,7 +1563,10 @@ begin
   ErrorMsg := 'Unexpected result waiting for response: %s';
 
   case Self.MsgEvent.WaitFor(Timeout) of
-    wrSignaled:  Result := true;
+    wrSignaled:  begin
+      Result := true;
+      Self.MsgEvent.ResetEvent;
+    end;
     wrTimeout:   ; // Just keep waiting
     wrError:     Fail(SysErrorMessage(Self.MsgEvent.LastError));
     wrAbandoned: Fail('Event abandoned');
