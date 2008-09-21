@@ -36,9 +36,25 @@ type
   private
     function GetLocation: TLocationTuple;
   public
-    constructor Create(ReplyTo: TProcessID; Location: TLocationTuple);
+    constructor Create(ReplyTo: TProcessID; Location: TLocationTuple); overload;
+    constructor Create(ReplyTo: TProcessID; Address: String; Port: Cardinal; Transport: String); overload;
 
     property Location: TLocationTuple read GetLocation;
+  end;
+
+  // I report the opening of a connection, returning the binding information of
+  // that connection:
+  //
+  // ("opened" {reply-to} (("127.0.0.01" 3017 "TCP") ("10.0.0.1" 80 "TCP")))
+  TOpenedMsg = class(TMessageTuple)
+  private
+    function GetLocalBinding: TLocationTuple;
+    function GetPeerBinding: TLocationTuple;
+  public
+    constructor Create(ReplyTo: TProcessID; LocalBinding, PeerBinding: TLocationTuple);
+
+    property LocalBinding: TLocationTuple read GetLocalBinding;
+    property PeerBinding:  TLocationTuple read GetPeerBinding;
   end;
 
   TDataMsg = class(TMessageTuple)
@@ -95,6 +111,18 @@ type
     function  FindSendData(Msg: TTuple): Boolean;
     procedure ReceiveData(Timeout: Cardinal);
     procedure SendData(Msg: TTuple);
+  end;
+
+  // I provide a nice "normal" interface to a ClientTcpConnectionActor.
+  TClientTcpConnectionActorInterface = class(TActorInterface)
+  private
+    Client: TProcessID;
+  public
+    constructor Create(ClientPID: TProcessID);
+
+    procedure Close;
+    procedure Connect(Address: String; Port: Cardinal; Transport: String = 'TCP');
+    procedure SendData(S: String);
   end;
 
 const
@@ -154,11 +182,55 @@ begin
   inherited Create(OpenMsg, ReplyTo, Location);
 end;
 
+constructor TOpenMsg.Create(ReplyTo: TProcessID; Address: String; Port: Cardinal; Transport: String);
+var
+  Target: TLocationTuple;
+begin
+  Target := TLocationTuple.Create(Address, Port, Transport);
+  try
+    Self.Create(ReplyTo, Target);
+  finally
+    Target.Free;
+  end;
+end;
+
 //* TOpenMsg Private methods ***************************************************
 
 function TOpenMsg.GetLocation: TLocationTuple;
 begin
   Result := Self.Parameters as TLocationTuple;
+end;
+
+//******************************************************************************
+//* TOpenedMsg                                                                 *
+//******************************************************************************
+//* TOpenedMsg Public methods **************************************************
+
+constructor TOpenedMsg.Create(ReplyTo: TProcessID; LocalBinding, PeerBinding: TLocationTuple);
+var
+  Params: TTuple;
+begin
+  Params := TTuple.Create;
+  try
+    Params.Add(LocalBinding);
+    Params.Add(PeerBinding);
+
+    inherited Create(OpenedMsg, ReplyTo, Params);
+  finally
+    Params.Free;
+  end;
+end;
+
+//* TOpenedMsg Private methods **************************************************
+
+function TOpenedMsg.GetLocalBinding: TLocationTuple;
+begin
+  Result := Self.Parameters[0] as TLocationTuple;
+end;
+
+function TOpenedMsg.GetPeerBinding: TLocationTuple;
+begin
+  Result := Self.Parameters[1] as TLocationTuple;
 end;
 
 //******************************************************************************
@@ -368,6 +440,47 @@ end;
 procedure TClientTcpConnectionActor.SignalOpeningTo(Target: TProcessID);
 begin
   Self.Send(Target, OpenedMsg);
+end;
+
+//******************************************************************************
+//* TClientTcpConnectionActorInterface                                         *
+//******************************************************************************
+//* TClientTcpConnectionActorInterface Public methods **************************
+
+constructor TClientTcpConnectionActorInterface.Create(ClientPID: TProcessID);
+begin
+  inherited Create;
+
+  Self.Client := ClientPID;
+end;
+
+procedure TClientTcpConnectionActorInterface.Close;
+begin
+  Self.Send(Self.Client, CloseConnectionMsg);
+end;
+
+procedure TClientTcpConnectionActorInterface.Connect(Address: String; Port: Cardinal; Transport: String = 'TCP');
+var
+  M: TOpenMsg;
+begin
+  M := TOpenMsg.Create(Self.PID, Address, Port, Transport);
+  try
+    Self.Send(Self.Client, M);
+  finally
+    M.Free;
+  end;
+end;
+
+procedure TClientTcpConnectionActorInterface.SendData(S: String);
+var
+  M: TSendDataMsg;
+begin
+  M := TSendDataMsg.Create(Self.PID, S);
+  try
+    SendActorMessage(Self.Client, M);
+  finally
+    M.Free;
+  end;
 end;
 
 end.
