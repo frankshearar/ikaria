@@ -1648,17 +1648,10 @@ end;
 
 class function TActor.RootActor: TProcessID;
 begin
-  ActorLock.Acquire;
-  try
-    if not Assigned(Root) then begin
-      Root := TRootActor.Create('');
-      TActorRunner.Create(Root);
-    end;
+  // The "root actor" is not used at all, at the moment. We thus don't waste
+  // resources creating one.
 
-    Result := Root.PID;
-  finally
-    ActorLock.Release;
-  end;
+  Result := '';
 end;
 
 constructor TActor.Create(Parent: TProcessID);
