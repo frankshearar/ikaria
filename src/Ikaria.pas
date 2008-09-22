@@ -365,6 +365,9 @@ type
   // I represent the environment in which Actors run. Subclasses might use any
   // manner of ways of executing Actors - in threads, with thread pools, with
   // events & message queues, whatever.
+  //
+  // Note that I implicitly define a self-contained, isolated namespace: Actors
+  // in two different ActorEnvironments cannot communicate.
   TActorEnvironment = class(TObject)
   protected
     function Whois(PID: TProcessID): TActorMailbox; virtual;
