@@ -144,9 +144,10 @@ type
 
   TestTActorMailbox = class(TTestCase)
   private
-    Mbox:    TActorMailbox;
-    M:       TActorMessage;
-    NewMsgs: Boolean;
+    Environment: TActorEnvironment;
+    Mbox:        TActorMailbox;
+    M:           TActorMessage;
+    NewMsgs:     Boolean;
 
     function  AllFinder(Msg: TTuple): Boolean;
     procedure CheckFound(ExpectedTag: String;
@@ -171,6 +172,7 @@ type
   TestTActorInterface = class(TTestCase)
   private
     BarName:      String;
+    Environment:  TActorEnvironment;
     FooName:      String;
     Intf:         TActorInterface;
     ReceivedAFoo: Boolean;
@@ -216,6 +218,7 @@ type
   TActorTestCase = class(TTestCase)
   private
     ActorExited: Boolean;
+    Environment: TActorEnvironment;
     ExitEvent:   TEvent;
     LastSentMsg: TActorMessage;
     MsgEvent:    TEvent;
@@ -1125,8 +1128,10 @@ procedure TestTActorMailbox.SetUp;
 begin
   inherited SetUp;
 
-  Self.Mbox    := TActorMailbox.Create;
-  Self.M       := TActorMessage.Create;
+  Self.Environment := TThreadedActorEnvironment.Create;
+
+  Self.Mbox    := TActorMailbox.Create(Self.Environment);
+  Self.M       := TActorMessage.Create(Self.Environment);
   Self.NewMsgs := false;
 end;
 
@@ -1134,6 +1139,7 @@ procedure TestTActorMailbox.TearDown;
 begin
   Self.M.Free;
   Self.Mbox.Free;
+  Self.Environment.Free;
 
   inherited TearDown;
 end;
@@ -1196,7 +1202,7 @@ procedure TestTActorMailbox.TestFindMessageReturnsFirstMatch;
 var
   M2: TActorMessage;
 begin
-  M2 := TActorMessage.Create;
+  M2 := TActorMessage.Create(Self.Environment);
   try
     Self.MBox.AddMessage(Self.M);
     Self.MBox.AddMessage(M2);
@@ -1218,7 +1224,7 @@ begin
   // message arrives in the mailbox. Thus, unmatched messages will not be
   // continually rechecked by a Receive.
 
-  M2 := TActorMessage.Create;
+  M2 := TActorMessage.Create(Self.Environment);
   try
     Self.MBox.AddMessage(Self.M);
     Self.MBox.AddMessage(M2);
@@ -1227,7 +1233,7 @@ begin
 
     Check(nil = Self.Mbox.FindMessage(Self.AllFinder), 'Already-checked messages not moved to the save queue');
 
-    M3 := TActorMessage.Create;
+    M3 := TActorMessage.Create(Self.Environment);
     try
       Self.Mbox.AddMessage(M3);
 
@@ -1266,7 +1272,7 @@ begin
   // then all the messages in the save queue are re-added to the mailbox, in
   // their arrival order.
 
-  M2 := TActorMessage.Create;
+  M2 := TActorMessage.Create(Self.Environment);
   try
     Self.MBox.AddMessage(Self.M);
     Self.MBox.AddMessage(M2);
@@ -1275,7 +1281,7 @@ begin
 
     Check(nil = Self.Mbox.FindMessage(Self.AllFinder), 'Already-checked messages not moved to the save queue');
 
-    M3 := TActorMessage.Create;
+    M3 := TActorMessage.Create(Self.Environment);
     try
       Self.Mbox.Timeout;
 
@@ -1297,9 +1303,11 @@ procedure TestTActorInterface.SetUp;
 begin
   inherited SetUp;
 
+  Self.Environment := TThreadedActorEnvironment.Create;
+
   Self.BarName := 'Bar';
   Self.FooName := 'Foo';
-  Self.Intf    := TActorInterface.Create;
+  Self.Intf    := TActorInterface.Create(Self.Environment);
 
   Self.ReceivedAFoo := false;
   Self.TimedOut     := false;
@@ -1367,12 +1375,12 @@ var
 begin
   Foo := Self.CreateFooMsg;
   try
-    SendActorMessage(Self.Intf.PID, Foo);
+    Self.Environment.PrimitiveSend('', Self.Intf.PID, Foo);
   finally
     Foo.Free;
   end;
 
-  Self.Intf.Receive(Self.RecogniseFooMsg, Self.ActOnFooMsg);
+  Self.Intf.Receive(Self.RecogniseFooMsg, Self.ActOnFooMsg, OneSecond);
 
   Check(Self.ReceivedAFoo, 'Didn''t receive a message');
 end;
@@ -1509,8 +1517,9 @@ procedure TActorTestCase.SetUp;
 begin
   inherited SetUp;
 
-  Self.ExitEvent := TSimpleEvent.Create;
-  Self.MsgEvent  := TSimpleEvent.Create;
+  Self.Environment := TThreadedActorEnvironment.Create;
+  Self.ExitEvent   := TSimpleEvent.Create;
+  Self.MsgEvent    := TSimpleEvent.Create;
 
   OnActorExitedHook := NotifyOfActorExit;
   OnMessageSentHook := StoreLastSentMessageInTestCase;
@@ -1705,7 +1714,7 @@ procedure TestTActor.TestActorNotifiesLinkSetOfAbnormalExit;
 var
   I: TActorInterface;
 begin
-  I := TActorInterface.Create;
+  I := TActorInterface.Create(Self.Environment);
   try
     I.SpawnLink(TErrorActor);
 
@@ -1722,7 +1731,7 @@ procedure TestTActor.TestActorNotifiesLinkSetOfExit;
 var
   I: TActorInterface;
 begin
-  I := TActorInterface.Create;
+  I := TActorInterface.Create(Self.Environment);
   try
     I.SpawnLink(TSingleShotActor);
 

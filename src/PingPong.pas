@@ -78,7 +78,7 @@ type
   protected
     procedure RegisterActions(Table: TActorMessageTable); override;
   public
-    constructor Create(Parent: TProcessID); override;
+    constructor Create(E: TActorEnvironment; Parent: TProcessID); override;
     destructor  Destroy; override;
   end;
 
@@ -196,7 +196,7 @@ begin
 
   RB := Spawn(TRingBenchmark);
   try
-    Intf := TActorInterfaceForRPC.Create;
+    Intf := TActorInterfaceForRPC.Create(DefaultEnv);
     Params := TTuple.Create;
     try
       Params.AddInteger(StrToInt(Self.NumProcs.Text));
@@ -370,9 +370,9 @@ end;
 //******************************************************************************
 //* TFibonacciActor Public methods *********************************************
 
-constructor TFibonacciActor.Create(Parent: TProcessID);
+constructor TFibonacciActor.Create(E: TActorEnvironment; Parent: TProcessID);
 begin
-  inherited Create(Parent);
+  inherited Create(E, Parent);
 
   Self.FibGen := TFibonacciGenerator.Create;
 end;

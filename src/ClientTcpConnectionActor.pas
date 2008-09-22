@@ -100,7 +100,7 @@ type
     procedure RegisterActions(Table: TActorMessageTable); override;
     procedure Run; override;
   public
-    constructor Create(Parent: TProcessID); override;
+    constructor Create(E: TActorEnvironment; Parent: TProcessID); override;
     destructor  Destroy; override;
 
     procedure Close(Msg: TTuple);
@@ -118,7 +118,7 @@ type
   private
     Client: TProcessID;
   public
-    constructor Create(ClientPID: TProcessID);
+    constructor Create(E: TActorEnvironment; ClientPID: TProcessID);
 
     procedure Close;
     procedure Connect(Address: String; Port: Cardinal; Transport: String = 'TCP');
@@ -291,9 +291,9 @@ end;
 //******************************************************************************
 //* TClientTcpConnectionActor Public methods ***********************************
 
-constructor TClientTcpConnectionActor.Create(Parent: TProcessID);
+constructor TClientTcpConnectionActor.Create(E: TActorEnvironment; Parent: TProcessID);
 begin
-  inherited Create(Parent);
+  inherited Create(E, Parent);
 
   Self.Connection := TIdTcpClient.Create(nil);
   Self.Timeout := 20*OneSecond;
@@ -447,9 +447,9 @@ end;
 //******************************************************************************
 //* TClientTcpConnectionActorInterface Public methods **************************
 
-constructor TClientTcpConnectionActorInterface.Create(ClientPID: TProcessID);
+constructor TClientTcpConnectionActorInterface.Create(E: TActorEnvironment; ClientPID: TProcessID);
 begin
-  inherited Create;
+  inherited Create(E);
 
   Self.Client := ClientPID;
 end;

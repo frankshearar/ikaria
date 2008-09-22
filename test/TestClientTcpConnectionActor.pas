@@ -27,6 +27,7 @@ type
     ConnEvent:       TEvent;
     DisconEvent:     TEvent;
     Disconnected:    Boolean;
+    Environment:     TActorEnvironment;
     Error:           String;
     LastClientPort:  Integer;
     Location:        TLocationTuple;
@@ -93,6 +94,7 @@ begin
 
   Self.ConnEvent   := TSimpleEvent.Create;
   Self.DisconEvent := TSimpleEvent.Create;
+  Self.Environment := TThreadedActorEnvironment.Create;
   Self.SendEvent   := TSimpleEvent.Create;
   Self.TestData    := 'test data';
 
@@ -108,12 +110,12 @@ begin
   Self.TestTable.Add(Self.FindReceivedData, Self.StoreReceivedData);
 
   Self.Location        := TLocationTuple.Create('localhost', Self.Server.DefaultPort, 'TCP');
-  Self.RPC             := TActorInterface.Create;
+  Self.RPC             := TActorInterface.Create(Self.Environment);
   Self.ConnectTo       := TOpenMsg.Create(Self.RPC.PID, Self.Location);
   Self.CloseConnection := TMessageTuple.Create(CloseConnectionMsg, Self.RPC.PID);
   Self.SendData        := TSendDataMsg.Create(Self.RPC.PID, Self.TestData);
 
-  Self.Connection := TClientTcpConnectionActor.Create(TActor.RootActor);
+  Self.Connection := TClientTcpConnectionActor.Create(Self.Environment, TActor.RootActor);
 
   Self.Closed          := false;
   Self.Connected       := false;

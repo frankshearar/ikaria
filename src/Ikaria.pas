@@ -143,15 +143,18 @@ type
     property ReplyTo:     TProcessID read GetReplyTo;
   end;
 
+  TActorEnvironment = class;
+
   // I represent a message sent to an Actor.
   //
   // I will free the Data you give me.
   TActorMessage = class(TObject)
   private
-    fData: TTuple;
-    fTag:  String;
+    Environment: TActorEnvironment;
+    fData:       TTuple;
+    fTag:        String;
   public
-    constructor Create;
+    constructor Create(E: TActorEnvironment);
     destructor  Destroy; override;
 
     procedure Accept(Actor: TActor); virtual;
@@ -171,6 +174,7 @@ type
   // I store messages sent to an Actor.
   TActorMailbox = class(TObject)
   private
+    Environment:       TActorEnvironment;
     fOnMessageArrived: TNotifyEvent;
     fPID:              TProcessID;
     Lock:              TCriticalSection;
@@ -186,7 +190,7 @@ type
     procedure RestoreSaveQueue;
     procedure SetOnMessageArrived(Value: TNotifyEvent);
   public
-    constructor Create;
+    constructor Create(E: TActorEnvironment);
     destructor  Destroy; override;
 
     procedure AddMessage(Msg: TActorMessage);
@@ -238,6 +242,7 @@ type
   // messages from Actors.
   TActorInterface = class(TObject)
   private
+    Environment: TActorEnvironment;
     fTerminated: Boolean;
     Mailbox:     TActorMailbox;
     MsgEvent:    TEvent;
@@ -249,7 +254,7 @@ type
   protected
     procedure DoNothing(Msg: TTuple);
   public
-    constructor Create;
+    constructor Create(E: TActorEnvironment);
     destructor  Destroy; override;
 
     procedure Link(PID: TProcessID);
@@ -325,7 +330,7 @@ type
   public
     class function RootActor: TProcessID;
 
-    constructor Create(Parent: TProcessID); virtual;
+    constructor Create(E: TActorEnvironment; Parent: TProcessID); virtual;
     destructor  Destroy; override;
 
     procedure Execute;
@@ -355,6 +360,50 @@ type
   public
     constructor Create(A: TActor);
     destructor  Destroy; override;
+  end;
+
+  // I represent the environment in which Actors run. Subclasses might use any
+  // manner of ways of executing Actors - in threads, with thread pools, with
+  // events & message queues, whatever.
+  TActorEnvironment = class(TObject)
+  protected
+    function Whois(PID: TProcessID): TActorMailbox; virtual;
+  public
+    function  NextPID: TProcessID; virtual;
+    function  NextTag: String; virtual;
+    procedure PrimitiveLink(LinkingPID, LinkedPID: TProcessID); virtual;
+    function  PrimitiveReceive(Mailbox: TActorMailbox; Table: TActorMessageTable): Boolean; virtual;
+    function  PrimitiveRegisterActor(A: TActorMailbox): TProcessID; virtual;
+    procedure PrimitiveSend(Sender, Target: TProcessID; Msg: TTuple); virtual;
+    function  PrimitiveSpawn(ActorType: TActorClass; Parent: TProcessID): TProcessID; virtual;
+    function  PrimitiveSpawnLink(ActorType: TActorClass; Parent: TProcessID): TProcessID; virtual;
+    procedure PrimitiveUnregisterActor(A: TActorMailbox); virtual;
+  end;
+
+  TThreadedActorEnvironment = class(TActorEnvironment)
+  private
+    Actors:    TStringList;
+    ActorLock: TCriticalSection; // Used to lock access to Actors.
+    UsedPIDs:  TStringList;
+
+    // Tag generation
+    NextAvailableTag: Int64;
+    TagLock:          TCriticalSection;
+  protected
+    function Whois(PID: TProcessID): TActorMailbox; override;
+  public
+    constructor Create;
+    destructor  Destroy; override;
+
+    function  NextPID: TProcessID; override;
+    function  NextTag: String; override;
+    procedure PrimitiveLink(LinkingPID, LinkedPID: TProcessID); override;
+    function  PrimitiveReceive(Mailbox: TActorMailbox; Table: TActorMessageTable): Boolean; override;
+    function  PrimitiveRegisterActor(A: TActorMailbox): TProcessID; override;
+    procedure PrimitiveSend(Sender, Target: TProcessID; Msg: TTuple); override;
+    function  PrimitiveSpawn(ActorType: TActorClass; Parent: TProcessID): TProcessID; override;
+    function  PrimitiveSpawnLink(ActorType: TActorClass; Parent: TProcessID): TProcessID; override;
+    procedure PrimitiveUnregisterActor(A: TActorMailbox); override;
   end;
 
   EActorException = class(Exception);
@@ -408,22 +457,12 @@ const
   OneSecond      = 1000; // milliseconds
 
 var
+  DefaultEnv:         TActorEnvironment;
   OnActorCreatedHook: TActorEventProc;
   OnActorExitedHook:  TActorMsgProc;
   OnMessageSentHook:  TMessageSendProc;
 
 implementation
-
-var
-  Actors:    TStringList;
-  Root:      TActor;
-  ActorLock: TCriticalSection; // Used to lock access to Actors.
-  UsedPIDs:  TStringList;
-
-// Tag generation
-var
-  NextAvailableTag: Int64;
-  TagLock: TCriticalSection;
 
 //******************************************************************************
 //* Unit Private functions/procedures                                          *
@@ -442,20 +481,6 @@ begin
   Result := Lowercase(WithoutFirstAndLastChars(GUIDToString(NewGuid)));
 end;
 
-function NextPID: TProcessID;
-begin
-  ActorLock.Acquire;
-  try
-    repeat
-      Result := ConstructUUID;
-    until (UsedPIDS.IndexOf(Result) = -1);
-
-    UsedPIDs.Add(Result);
-  finally
-    ActorLock.Release;
-  end;
-end;
-
 procedure NotifyOfActorCreation(ActorType, PID: String);
 begin
   if Assigned(OnActorCreatedHook) then
@@ -472,154 +497,6 @@ procedure NotifyOfMessageSend(Sender, Target: TProcessID; Msg: TActorMessage);
 begin
   if Assigned(OnMessageSentHook) then
     OnMessageSentHook(Sender, Target, Msg);
-end;
-
-function NextTag: String;
-begin
-  // For now, tags start at 0 and increment up.
-  TagLock.Acquire;
-  try
-    Result := IntToStr(NextAvailableTag);
-    Inc(NextAvailableTag);
-  finally
-    TagLock.Release;
-  end;
-end;
-
-function Whois(PID: TProcessID): TActorMailbox;
-var
-  Index: Integer;
-begin
-  // Return a pointer to the actor known by PID, or return nil if no such actor
-  // exists.
-  //
-  // PRECONDITION: You've acquired ActorLock!
-  Result := nil;
-
-  Index := Actors.IndexOf(PID);
-
-  if (Index <> -1) then
-    Result := Actors.Objects[Index] as TActorMailbox;
-end;
-
-procedure PrimitiveLink(LinkingPID, LinkedPID: TProcessID);
-var
-  A, B: TActorMailbox;
-begin
-  ActorLock.Acquire;
-  try
-    A := Whois(LinkingPID);
-    B := Whois(LinkedPID);
-
-    if Assigned(A) and Assigned(B) then begin
-      A.LinkSet.Add(B.PID);
-      B.LinkSet.Add(A.PID);
-    end;
-  finally
-    ActorLock.Release;
-  end;
-end;
-
-function PrimitiveReceive(Mailbox: TActorMailbox; Table: TActorMessageTable): Boolean;
-var
-  I:   Integer;
-  Msg: TActorMessage;
-begin
-  // Return true iff we receive a message matching one of Table's conditions.
-  Result := false;
-
-  Msg := Mailbox.FindAndProcessMessage(Table, I);
-  try
-    if Assigned(Msg) then begin
-      Result := true;
-      Table.Actions[I](Msg.Data);
-    end;
-  finally
-    Msg.Free;
-  end;
-end;
-
-function PrimitiveRegisterActor(A: TActorMailbox): TProcessID;
-begin
-  ActorLock.Acquire;
-  try
-    Result := NextPID;
-
-    Actors.AddObject(Result, A);
-  finally
-    ActorLock.Release;
-  end;
-end;
-
-procedure PrimitiveSend(Sender, Target: TProcessID; Msg: TTuple);
-  procedure DeliverMsg(Target: TProcessID; Msg: TActorMessage);
-  var
-    TargetMbox: TActorMailbox;
-  begin
-    ActorLock.Acquire;
-    try
-      TargetMbox := Whois(Target);
-
-      if Assigned(TargetMbox) then
-        TargetMbox.AddMessage(Msg);
-    finally
-      ActorLock.Release;
-    end;
-  end;
-var
-  AMsg: TActorMessage;
-begin
-  // Send a message Msg from Sender to Target.
-  //
-  // It doesn't matter whether there is an actor with mail address Target.
-
-  AMsg := TActorMessage.Create;
-  try
-    AMsg.Data := Msg.Copy as TTuple;
-
-    DeliverMsg(Target, AMsg);
-
-    NotifyOfMessageSend(Sender, Target, AMsg);
-  finally
-    AMsg.Free;
-  end;
-end;
-
-function PrimitiveSpawn(ActorType: TActorClass; Parent: TProcessID): TProcessID;
-var
-  A: TActor;
-begin
-  A := ActorType.Create(Parent);
-  Result := A.PID;
-
-  TActorRunner.Create(A);
-end;
-
-function PrimitiveSpawnLink(ActorType: TActorClass; Parent: TProcessID): TProcessID;
-var
-  Child: TActor;
-begin
-  Child := ActorType.Create(Parent);
-  PrimitiveLink(Parent, Child.PID);
-
-  Result := Child.PID;
-
-  TActorRunner.Create(Child);
-end;
-
-procedure PrimitiveUnregisterActor(A: TActorMailbox);
-var
-  Index: Integer;
-begin
-  ActorLock.Acquire;
-  try
-    Index := Actors.IndexOf(A.PID);
-
-    if (Index <> -1) then
-      Actors.Delete(Index);
-  finally
-    ActorLock.Release;
-  end;
 end;
 
 //******************************************************************************
@@ -659,7 +536,7 @@ var
 begin
   Result := nil;
 
-  Intf := TActorInterfaceForRPC.Create;
+  Intf := TActorInterfaceForRPC.Create(DefaultEnv);
   try
     ReroutedMsg := Msg.RouteTo(Intf.PID);
     try
@@ -679,12 +556,12 @@ end;
 
 procedure SendActorMessage(Target: TProcessID; Msg: TTuple);
 begin
-  PrimitiveSend(TActor.RootActor, Target, Msg);
+  DefaultEnv.PrimitiveSend(TActor.RootActor, Target, Msg);
 end;
 
 function Spawn(ActorType: TActorClass): TProcessID;
 begin
-  Result := PrimitiveSpawn(ActorType, TActor.RootActor);
+  Result := DefaultEnv.PrimitiveSpawn(ActorType, TActor.RootActor);
 end;
 
 function Spawn(T: TThunk): TProcessID;
@@ -693,7 +570,7 @@ var
 begin
   // This needs to hook into the Primitive layer.
 
-  Thunker := TThunkActor.Create(TActor.RootActor);
+  Thunker := TThunkActor.Create(DefaultEnv, TActor.RootActor);
   Thunker.Thunk := T;
 
   Result := Thunker.PID;
@@ -1075,12 +952,14 @@ end;
 //******************************************************************************
 //* TActorMessage Public methods ***********************************************
 
-constructor TActorMessage.Create;
+constructor TActorMessage.Create(E: TActorEnvironment);
 begin
   inherited Create;
 
+  Self.Environment := E;
+
   Self.fData := TTuple.Create;
-  Self.fTag  := NextTag;
+  Self.fTag  := Self.Environment.NextTag;
 end;
 
 destructor TActorMessage.Destroy;
@@ -1102,7 +981,7 @@ end;
 
 function TActorMessage.Copy: TActorMessage;
 begin
-  Result := TActorMessage.Create;
+  Result := TActorMessage.Create(Self.Environment);
   Result.Data := Self.Data.Copy as TTuple;
   Result.fTag := Self.Tag;
 end;
@@ -1112,9 +991,11 @@ end;
 //******************************************************************************
 //* TActorMailbox Public methods ***********************************************
 
-constructor TActorMailbox.Create;
+constructor TActorMailbox.Create(E: TActorEnvironment);
 begin
   inherited Create;
+
+  Self.Environment := E;
 
   Self.LinkSet := TStringList.Create;
   Self.LinkSet.Duplicates := dupIgnore;
@@ -1124,14 +1005,14 @@ begin
   Self.Messages  := TObjectList.Create(false);
   Self.SaveQueue := TObjectList.Create(false);
 
-  Self.fPID := PrimitiveRegisterActor(Self);
+  Self.fPID := Self.Environment.PrimitiveRegisterActor(Self);
 end;
 
 destructor TActorMailbox.Destroy;
 begin
   Self.Lock.Acquire;
   try
-    PrimitiveUnregisterActor(Self);
+    Self.Environment.PrimitiveUnregisterActor(Self);
     Self.Purge;
     Self.SaveQueue.Free;
     Self.Messages.Free;
@@ -1243,7 +1124,7 @@ end;
 
 procedure TActorMailbox.Link(PID: TProcessID);
 begin
-  PrimitiveLink(Self.PID, PID);
+  Self.Environment.PrimitiveLink(Self.PID, PID);
 end;
 
 procedure TActorMailbox.Purge;
@@ -1385,12 +1266,14 @@ end;
 //******************************************************************************
 //* TActorInterface Public methods *********************************************
 
-constructor TActorInterface.Create;
+constructor TActorInterface.Create(E: TActorEnvironment);
 begin
   inherited Create;
 
+  Self.Environment := E;
+
   Self.fTerminated := false;
-  Self.Mailbox     := TActorMailbox.Create;
+  Self.Mailbox     := TActorMailbox.Create(Self.Environment);
   Self.MsgEvent    := TSimpleEvent.Create;
 
   Self.Mailbox.OnMessageArrived := Self.NewMessageArrived;
@@ -1470,7 +1353,7 @@ begin
 
   while not Self.Terminated do begin
     if Self.WaitForMessage(OneSecond) then begin
-      PrimitiveReceive(Self.Mailbox, Table);
+      Self.Environment.PrimitiveReceive(Self.Mailbox, Table);
       Break;
     end;
   end;
@@ -1498,7 +1381,7 @@ begin
 
   while not Self.Terminated and (Now < EndTime) do begin
     if Self.WaitForMessage(OneSecond) then begin
-      Finished := PrimitiveReceive(Self.Mailbox, Table);
+      Finished := Self.Environment.PrimitiveReceive(Self.Mailbox, Table);
       if Finished then Break;
     end;
   end;
@@ -1532,17 +1415,17 @@ end;
 
 procedure TActorInterface.Send(Target: TProcessID; T: TTuple);
 begin
-  PrimitiveSend(Self.Mailbox.PID, Target, T);
+  Self.Environment.PrimitiveSend(Self.Mailbox.PID, Target, T);
 end;
 
 function TActorInterface.Spawn(ActorType: TActorClass): TProcessID;
 begin
-  Result := PrimitiveSpawn(ActorType, Self.PID);
+  Result := Self.Environment.PrimitiveSpawn(ActorType, Self.PID);
 end;
 
 function TActorInterface.SpawnLink(ActorType: TActorClass): TProcessID;
 begin
-  Result := PrimitiveSpawnLink(ActorType, Self.PID);
+  Result := Self.Environment.PrimitiveSpawnLink(ActorType, Self.PID);
 end;
 
 //* TActorInterface Protected methods ******************************************
@@ -1654,9 +1537,9 @@ begin
   Result := '';
 end;
 
-constructor TActor.Create(Parent: TProcessID);
+constructor TActor.Create(E: TActorEnvironment; Parent: TProcessID);
 begin
-  inherited Create;
+  inherited Create(E);
 
   Self.ParentID := Parent;
 
@@ -1831,12 +1714,274 @@ begin
   Self.Actor.Execute;
 end;
 
-initialization
-  ActorLock := TCriticalSection.Create;
-  Actors    := TStringList.Create;
-  UsedPIDs  := TStringList.Create;
+//******************************************************************************
+//* TActorEnvironment                                                          *
+//******************************************************************************
+//* TActorEnvironment Public methods *******************************************
+
+function TActorEnvironment.NextPID: TProcessID;
+begin
+  Result := '';
+
+  raise EAbstractError.Create(Self.ClassName + ' must override NextPID');
+end;
+
+function TActorEnvironment.NextTag: String;
+begin
+  Result := '';
+
+  raise EAbstractError.Create(Self.ClassName + ' must override NextTag');
+end;
+
+procedure TActorEnvironment.PrimitiveLink(LinkingPID, LinkedPID: TProcessID);
+begin
+  raise EAbstractError.Create(Self.ClassName + ' must override PrimitiveLink');
+end;
+
+function TActorEnvironment.PrimitiveReceive(Mailbox: TActorMailbox; Table: TActorMessageTable): Boolean;
+begin
+  Result := false;
+
+  raise EAbstractError.Create(Self.ClassName + ' must override PrimitiveReceive');
+end;
+
+function TActorEnvironment.PrimitiveRegisterActor(A: TActorMailbox): TProcessID;
+begin
+  Result := '';
+
+  raise EAbstractError.Create(Self.ClassName + ' must override PrimitiveRegisterActor');
+end;
+
+procedure TActorEnvironment.PrimitiveSend(Sender, Target: TProcessID; Msg: TTuple);
+begin
+  raise EAbstractError.Create(Self.ClassName + ' must override PrimitiveSend');
+end;
+
+function TActorEnvironment.PrimitiveSpawn(ActorType: TActorClass; Parent: TProcessID): TProcessID;
+begin
+  Result := '';
+
+  raise EAbstractError.Create(Self.ClassName + ' must override PrimitiveSpawn');
+end;
+
+function TActorEnvironment.PrimitiveSpawnLink(ActorType: TActorClass; Parent: TProcessID): TProcessID;
+begin
+  Result := '';
+
+  raise EAbstractError.Create(Self.ClassName + ' must override PrimitiveSpawnLink');
+end;
+
+procedure TActorEnvironment.PrimitiveUnregisterActor(A: TActorMailbox);
+begin
+  raise EAbstractError.Create(Self.ClassName + ' must override PrimitiveUnregisterActor');
+end;
+
+//* TActorEnvironment Protected methods ****************************************
+
+function TActorEnvironment.Whois(PID: TProcessID): TActorMailbox;
+begin
+  Result := nil;
+
+  raise EAbstractError.Create(Self.ClassName + ' must override Whois');
+end;
+
+//******************************************************************************
+//* TThreadedActorEnvironment                                                  *
+//******************************************************************************
+//* TThreadedActorEnvironment Public methods ***********************************
+
+constructor TThreadedActorEnvironment.Create;
+begin
+  inherited Create;
+
+  Self.ActorLock := TCriticalSection.Create;
+  Self.Actors    := TStringList.Create;
+  Self.UsedPIDs  := TStringList.Create;
 
   // Tag generation
-  NextAvailableTag := 0;
-  TagLock          := TCriticalSection.Create;
+  Self.NextAvailableTag := 0;
+  Self.TagLock          := TCriticalSection.Create;
+end;
+
+destructor TThreadedActorEnvironment.Destroy;
+begin
+  Self.ActorLock.Acquire;
+  try
+    Self.UsedPIDs.Free;
+    Self.Actors.Free;
+  finally
+    Self.ActorLock.Release;
+  end;
+  Self.ActorLock.Free;
+  Self.TagLock.Free;
+
+  inherited Destroy;
+end;
+
+function TThreadedActorEnvironment.NextPID: TProcessID;
+begin
+  Self.ActorLock.Acquire;
+  try
+    repeat
+      Result := ConstructUUID;
+    until (UsedPIDS.IndexOf(Result) = -1);
+
+    UsedPIDs.Add(Result);
+  finally
+    Self.ActorLock.Release;
+  end;
+end;
+
+function TThreadedActorEnvironment.NextTag: String;
+begin
+  // For now, tags start at 0 and increment up.
+  TagLock.Acquire;
+  try
+    Result := IntToStr(NextAvailableTag);
+    Inc(NextAvailableTag);
+  finally
+    TagLock.Release;
+  end;
+end;
+
+procedure TThreadedActorEnvironment.PrimitiveLink(LinkingPID, LinkedPID: TProcessID); 
+var
+  A, B: TActorMailbox;
+begin
+  Self.ActorLock.Acquire;
+  try
+    A := Self.Whois(LinkingPID);
+    B := Self.Whois(LinkedPID);
+
+    if Assigned(A) and Assigned(B) then begin
+      A.LinkSet.Add(B.PID);
+      B.LinkSet.Add(A.PID);
+    end;
+  finally
+    Self.ActorLock.Release;
+  end;
+end;
+
+function TThreadedActorEnvironment.PrimitiveReceive(Mailbox: TActorMailbox; Table: TActorMessageTable): Boolean; 
+var
+  I:   Integer;
+  Msg: TActorMessage;
+begin
+  // Return true iff we receive a message matching one of Table's conditions.
+  Result := false;
+
+  Msg := Mailbox.FindAndProcessMessage(Table, I);
+  try
+    if Assigned(Msg) then begin
+      Result := true;
+      Table.Actions[I](Msg.Data);
+    end;
+  finally
+    Msg.Free;
+  end;
+end;
+
+function TThreadedActorEnvironment.PrimitiveRegisterActor(A: TActorMailbox): TProcessID; 
+begin
+  Self.ActorLock.Acquire;
+  try
+    Result := NextPID;
+
+    Self.Actors.AddObject(Result, A);
+  finally
+    Self.ActorLock.Release;
+  end;
+end;
+
+procedure TThreadedActorEnvironment.PrimitiveSend(Sender, Target: TProcessID; Msg: TTuple);
+  procedure DeliverMsg(Target: TProcessID; Msg: TActorMessage);
+  var
+    TargetMbox: TActorMailbox;
+  begin
+    Self.ActorLock.Acquire;
+    try
+      TargetMbox := Self.Whois(Target);
+
+      if Assigned(TargetMbox) then
+        TargetMbox.AddMessage(Msg);
+    finally
+      Self.ActorLock.Release;
+    end;
+  end;
+var
+  AMsg: TActorMessage;
+begin
+  // Send a message Msg from Sender to Target.
+  //
+  // It doesn't matter whether there is an actor with mail address Target.
+
+  AMsg := TActorMessage.Create(Self);
+  try
+    AMsg.Data := Msg.Copy as TTuple;
+
+    DeliverMsg(Target, AMsg);
+
+    NotifyOfMessageSend(Sender, Target, AMsg);
+  finally
+    AMsg.Free;
+  end;
+end;
+
+function TThreadedActorEnvironment.PrimitiveSpawn(ActorType: TActorClass; Parent: TProcessID): TProcessID; 
+var
+  A: TActor;
+begin
+  A := ActorType.Create(Self, Parent);
+  Result := A.PID;
+
+  TActorRunner.Create(A);
+end;
+
+function TThreadedActorEnvironment.PrimitiveSpawnLink(ActorType: TActorClass; Parent: TProcessID): TProcessID; 
+var
+  Child: TActor;
+begin
+  Child := ActorType.Create(Self, Parent);
+  PrimitiveLink(Parent, Child.PID);
+
+  Result := Child.PID;
+
+  TActorRunner.Create(Child);
+end;
+
+procedure TThreadedActorEnvironment.PrimitiveUnregisterActor(A: TActorMailbox);
+var
+  Index: Integer;
+begin
+  Self.ActorLock.Acquire;
+  try
+    Index := Self.Actors.IndexOf(A.PID);
+
+    if (Index <> -1) then
+      Self.Actors.Delete(Index);
+  finally
+    Self.ActorLock.Release;
+  end;
+end;
+
+//* TThreadedActorEnvironment Protected methods ********************************
+
+function TThreadedActorEnvironment.Whois(PID: TProcessID): TActorMailbox;
+var
+  Index: Integer;
+begin
+  // Return a pointer to the actor known by PID, or return nil if no such actor
+  // exists.
+  //
+  // PRECONDITION: You've acquired ActorLock!
+  Result := nil;
+
+  Index := Self.Actors.IndexOf(PID);
+
+  if (Index <> -1) then
+    Result := Self.Actors.Objects[Index] as TActorMailbox;
+end;
+
+initialization
+  DefaultEnv := TThreadedActorEnvironment.Create;
 end.
