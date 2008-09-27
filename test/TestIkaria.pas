@@ -175,13 +175,16 @@ type
     Environment:  TActorEnvironment;
     FooName:      String;
     Intf:         TActorInterface;
+    ReceivedABar: Boolean;
     ReceivedAFoo: Boolean;
     TimedOut:     Boolean;
 
+    procedure ActOnBarMsg(Msg: TTuple);
     procedure ActOnFooMsg(Msg: TTuple);
     function  CreateBarMsg: TTuple;
     function  CreateFooMsg: TTuple;
     function  CreateMsgNamed(Name: String): TTuple;
+    function  RecogniseBarMsg(Msg: TTuple): Boolean;
     function  RecogniseFooMsg(Msg: TTuple): Boolean;
     procedure Timeout;
   public
@@ -190,6 +193,7 @@ type
   published
     procedure TestReceive;
     procedure TestReceiveReturnsOnlyOnAMatch;
+    procedure TestReceiveTwoMessages;
     procedure TestReceiveWithTimeout;
     procedure TestReceiveWithZeroTimeout;
   end;
@@ -1322,6 +1326,10 @@ end;
 
 //* TestTActorInterface Private methods ****************************************
 
+procedure TestTActorInterface.ActOnBarMsg(Msg: TTuple);
+begin
+  Self.ReceivedABar := true;
+end;
 
 procedure TestTActorInterface.ActOnFooMsg(Msg: TTuple);
 begin
@@ -1346,20 +1354,14 @@ begin
   Result := M;
 end;
 
-function TestTActorInterface.RecogniseFooMsg(Msg: TTuple): Boolean;
-var
-  O: TMessageTuple;
+function TestTActorInterface.RecogniseBarMsg(Msg: TTuple): Boolean;
 begin
-  try
-    O := TMessageTuple.Overlay(Msg);
-    try
-      Result := O.MessageName = FooName;
-    finally
-      O.Free;
-    end;
-  except
-    Result := false;
-  end;
+  Result := Self.Intf.MatchMessageName(Msg, Self.BarName);
+end;
+
+function TestTActorInterface.RecogniseFooMsg(Msg: TTuple): Boolean;
+begin
+  Result := Self.Intf.MatchMessageName(Msg, Self.FooName);
 end;
 
 procedure TestTActorInterface.Timeout;
@@ -1386,20 +1388,35 @@ begin
 end;
 
 procedure TestTActorInterface.TestReceiveReturnsOnlyOnAMatch;
-var
-  Bar: TTuple;
 begin
-  Bar := Self.CreateBarMsg;
-  try
-    SendActorMessage(Self.Intf.PID, Bar);
-  finally
-    Bar.Free;
-  end;
+  Self.Intf.Send(Self.Intf.PID, Self.BarName);
 
   Self.Intf.Receive(Self.RecogniseFooMsg, Self.ActOnFooMsg, TenthOfASecond, Self.Timeout);
 
   Check(not Self.ReceivedAFoo, 'Received a message');
   Check(Self.TimedOut,         'Didn''t time out waiting for a particular message');
+end;
+
+procedure TestTActorInterface.TestReceiveTwoMessages;
+var
+  T: TActorMessageTable;
+begin
+  T := TActorMessageTable.Create;
+  try
+    T.Add(Self.RecogniseBarMsg, Self.ActOnBarMsg);
+    T.Add(Self.RecogniseFooMsg, Self.ActOnFooMsg);
+
+    Self.Intf.Send(Self.Intf.PID, Self.BarName);
+    Self.Intf.Send(Self.Intf.PID, Self.FooName);
+
+    Self.Intf.Receive(T, OneSecond, Self.Timeout);
+    Check(Self.ReceivedABar, 'Bar message not received');
+
+    Self.Intf.Receive(T, OneSecond, Self.Timeout);
+    Check(Self.ReceivedAFoo, 'Foo message not received');
+  finally
+    T.Free;
+  end;
 end;
 
 procedure TestTActorInterface.TestReceiveWithTimeout;

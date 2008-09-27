@@ -244,8 +244,10 @@ type
   private
     Environment: TActorEnvironment;
     fTerminated: Boolean;
+    Lock:        TCriticalSection;
     Mailbox:     TActorMailbox;
     MsgEvent:    TEvent;
+    PendingMsgs:  Cardinal;
 
     function  GetPID: TProcessID;
     procedure NewMessageArrived(Sender: TObject);
@@ -1276,8 +1278,10 @@ begin
   Self.Environment := E;
 
   Self.fTerminated := false;
+  Self.Lock        := TCriticalSection.Create;
   Self.Mailbox     := TActorMailbox.Create(Self.Environment);
   Self.MsgEvent    := TSimpleEvent.Create;
+  Self.PendingMsgs := 0;
 
   Self.Mailbox.OnMessageArrived := Self.NewMessageArrived;
 end;
@@ -1287,6 +1291,7 @@ begin
   Self.fTerminated := true;
   Self.MsgEvent.Free;
   Self.Mailbox.Free;
+  Self.Lock.Free;
 
   inherited Destroy;
 end;
@@ -1450,7 +1455,13 @@ begin
   // mailbox.
   // Sender points to the mailbox.
 
-  Self.MsgEvent.SetEvent;
+  Self.Lock.Acquire;
+  try
+    Inc(Self.PendingMsgs);
+    Self.MsgEvent.SetEvent;
+  finally
+    Self.Lock.Release;
+  end;
 end;
 
 procedure TActorInterface.NullThunk;
@@ -1476,7 +1487,15 @@ begin
   case Self.MsgEvent.WaitFor(Timeout) of
     wrSignaled:  begin
       Result := true;
-      Self.MsgEvent.ResetEvent;
+
+      Self.Lock.Acquire;
+      try
+        Dec(Self.PendingMsgs);
+        if (Self.PendingMsgs = 0) then
+          Self.MsgEvent.ResetEvent;
+      finally
+        Self.Lock.Release;
+      end;
     end;
     wrTimeout:   ; // Just keep waiting
     wrError:     Fail(SysErrorMessage(Self.MsgEvent.LastError));
