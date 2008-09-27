@@ -337,7 +337,7 @@ begin
 
   Self.ConnEvent.ResetEvent;
   Self.Connection.Connect(Self.ConnectTo);
-  Self.WaitForTimeout(Self.ConnEvent, OneSecond, 'Server accepted another connection');
+  Self.WaitFor(Self.ConnEvent, OneSecond, 'Client didn''t reconnect');
 end;
 
 procedure TestTClientTcpConnectionActor.TestReceivedData;

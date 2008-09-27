@@ -45,13 +45,17 @@ type
   // I report the opening of a connection, returning the binding information of
   // that connection:
   //
+  // ("opened" <own pid> (<local binding> <remote binding>)):
   // ("opened" {reply-to} (("127.0.0.01" 3017 "TCP") ("10.0.0.1" 80 "TCP")))
   TOpenedMsg = class(TMessageTuple)
   private
     function GetLocalBinding: TLocationTuple;
     function GetPeerBinding: TLocationTuple;
   public
-    constructor Create(ReplyTo: TProcessID; LocalBinding, PeerBinding: TLocationTuple);
+    constructor Create(ReplyTo: TProcessID; LocalBinding, PeerBinding: TLocationTuple); overload;
+    constructor Create(ReplyTo: TProcessID;
+                       LocalAddress: String; LocalPort: Cardinal; LocalTransport: String;
+                       PeerAddress: String; PeerPort: Cardinal; PeerTransport: String); overload;
 
     property LocalBinding: TLocationTuple read GetLocalBinding;
     property PeerBinding:  TLocationTuple read GetPeerBinding;
@@ -81,7 +85,7 @@ type
   // An Actor that sends the following messages:
   // * ("closed" {own-pid})
   // * ("closed" {own-pid} ("error reason"))
-  // * ("opened" {own-pid})
+  // * ("opened" <own pid> (<local binding> <remote binding>))
   // * ("received-data {own-pid} ("data"))
   // and receives the following messages:
   // * ("close" {src-pid})
@@ -116,13 +120,26 @@ type
   // I provide a nice "normal" interface to a ClientTcpConnectionActor.
   TClientTcpConnectionActorInterface = class(TActorInterface)
   private
-    Client: TProcessID;
+    Client:        TProcessID;
+    fLocalBinding: TLocationTuple;
+    fPeerBinding:  TLocationTuple;
+    fTimeout:      Cardinal;
+
+    function  FindOpened(Msg: TTuple): Boolean;
+    procedure RaiseConnectTimeoutException;
+    procedure ReactToOpened(Msg: TTuple);
+    procedure Replace(var Field: TLocationTuple; NewValue: TLocationTuple);
   public
     constructor Create(E: TActorEnvironment; ClientPID: TProcessID);
+    destructor  Destroy; override;
 
     procedure Close;
     procedure Connect(Address: String; Port: Cardinal; Transport: String = 'TCP');
     procedure SendData(S: String);
+
+    property LocalBinding: TLocationTuple read fLocalBinding;
+    property PeerBinding:  TLocationTuple read fPeerBinding;
+    property Timeout:      Cardinal       read fTimeout write fTimeout;
   end;
 
 const
@@ -139,7 +156,7 @@ const
 implementation
 
 uses
-  SysUtils, TypInfo, WinSock;
+  IdException, IdSocketHandle, SysUtils, TypInfo, WinSock;
 
 //******************************************************************************
 //* TLocationTuple                                                             *
@@ -218,6 +235,26 @@ begin
     inherited Create(OpenedMsg, ReplyTo, Params);
   finally
     Params.Free;
+  end;
+end;
+
+constructor TOpenedMsg.Create(ReplyTo: TProcessID;
+                              LocalAddress: String; LocalPort: Cardinal; LocalTransport: String;
+                              PeerAddress: String; PeerPort: Cardinal; PeerTransport: String);
+var
+  LocalBinding: TLocationTuple;
+  PeerBinding:  TLocationTuple;
+begin
+  LocalBinding := TLocationTuple.Create(LocalAddress, LocalPort, LocalTransport);
+  try
+    PeerBinding := TLocationTuple.Create(PeerAddress, PeerPort, PeerTransport);
+    try
+      Self.Create(ReplyTo, LocalBinding, PeerBinding);
+    finally
+      PeerBinding.Free;
+    end;
+  finally
+    LocalBinding.Free;
   end;
 end;
 
@@ -319,7 +356,8 @@ procedure TClientTcpConnectionActor.Connect(Msg: TTuple);
 var
   Conn: TOpenMsg;
 begin
-  if Self.Connection.Connected then Exit;
+  if Self.Connection.Connected then
+    Self.Connection.Disconnect;
 
   Conn := TOpenMsg.Overlay(Msg);
   try
@@ -389,7 +427,9 @@ procedure TClientTcpConnectionActor.Run;
 begin
   while not Self.Terminated do begin
     Self.Receive(Self.MsgTable, FiftyMilliseconds);
-    Self.ReceiveData(FiftyMilliseconds);
+
+    if Self.Connected then
+      Self.ReceiveData(FiftyMilliseconds);
   end;
 end;
 
@@ -438,8 +478,17 @@ begin
 end;
 
 procedure TClientTcpConnectionActor.SignalOpeningTo(Target: TProcessID);
+var
+  B:        TIdSocketHandle;
+  Bindings: TOpenedMsg;
 begin
-  Self.Send(Target, OpenedMsg);
+  B := Self.Connection.Socket.Binding;
+  Bindings := TOpenedMsg.Create(Self.PID, B.IP, B.Port, 'TCP', B.PeerIP, B.PeerPort, 'TCP');
+  try
+    Self.Send(Self.Controller, Bindings);
+  finally
+    Bindings.Free;
+  end;
 end;
 
 //******************************************************************************
@@ -452,6 +501,18 @@ begin
   inherited Create(E);
 
   Self.Client := ClientPID;
+
+  Self.fLocalBinding := TLocationTuple.Create('', 0, '');
+  Self.fPeerBinding  := Self.LocalBinding.Copy as TLocationTuple;
+  Self.Timeout := 5*OneSecond;
+end;
+
+destructor TClientTcpConnectionActorInterface.Destroy;
+begin
+  Self.fPeerBinding.Free;
+  Self.fLocalBinding.Free;
+
+  inherited Destroy;
 end;
 
 procedure TClientTcpConnectionActorInterface.Close;
@@ -461,14 +522,27 @@ end;
 
 procedure TClientTcpConnectionActorInterface.Connect(Address: String; Port: Cardinal; Transport: String = 'TCP');
 var
-  M: TOpenMsg;
+  M:    TOpenMsg;
+  Peer: TLocationTuple;
 begin
+  // In the case of reconnections, this is wrong, for a time at least. In
+  // particular, PeerBinding will contain the binding of the yet-to-be-connected
+  // connection.
+  Peer := TLocationTuple.Create(Address, Port, Transport);
+  try
+    Self.Replace(Self.fPeerBinding, Peer);
+  finally
+    Peer.Free;
+  end;
+
   M := TOpenMsg.Create(Self.PID, Address, Port, Transport);
   try
     Self.Send(Self.Client, M);
   finally
     M.Free;
   end;
+
+  Self.Receive(Self.FindOpened, Self.ReactToOpened, Self.Timeout, Self.RaiseConnectTimeoutException);
 end;
 
 procedure TClientTcpConnectionActorInterface.SendData(S: String);
@@ -481,6 +555,40 @@ begin
   finally
     M.Free;
   end;
+end;
+
+//* TClientTcpConnectionActorInterface Private methods *************************
+
+function TClientTcpConnectionActorInterface.FindOpened(Msg: TTuple): Boolean;
+begin
+  Result := Self.MatchMessageName(Msg, OpenedMsg)
+end;
+
+procedure TClientTcpConnectionActorInterface.RaiseConnectTimeoutException;
+var
+  B: TLocationTuple;
+begin
+  B := Self.PeerBinding;
+
+  raise EIdConnectException.Create(Format('Failed to connect to %s:%d/%s', [B.Address, B.Port, B.Transport]));
+end;
+
+procedure TClientTcpConnectionActorInterface.ReactToOpened(Msg: TTuple);
+var
+  O: TOpenedMsg;
+begin
+  O := TOpenedMsg.Overlay(Msg);
+  try
+    Self.Replace(Self.fLocalBinding, O.LocalBinding);
+    Self.Replace(Self.fPeerBinding, O.PeerBinding);
+  finally
+    O.Free;
+  end;
+end;
+
+procedure TClientTcpConnectionActorInterface.Replace(var Field: TLocationTuple; NewValue: TLocationTuple);
+begin
+  Field := NewValue.Copy as TLocationTuple;
 end;
 
 end.
