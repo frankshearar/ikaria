@@ -26,6 +26,15 @@ type
     procedure RegisterActions(Table: TActorMessageTable); override;
   end;
 
+  TMessageQueueHandleMsg = class(TMessageTuple)
+  private
+    function GetHandle: HWND;
+  public
+    constructor Create(ReplyTo: TProcessID; Handle: HWND);
+
+    property Handle: HWND read GetHandle;
+  end;
+
 const
   MessageQueueHandleName = 'message-queue-handle';
   WM_IKARIA_MSG = WM_USER + 10000;
@@ -69,14 +78,40 @@ end;
 
 procedure TWindowsMessageForwarder.SetMessageQueueHandle(Msg: TTuple);
 var
-  O: TMessageTuple;
+  O: TMessageQueueHandleMsg;
 begin
-  O := TMessageTuple.Overlay(Msg);
+  O := TMessageQueueHandleMsg.Overlay(Msg);
   try
-    Self.TargetHandle := (O.Parameters[0] as TIntegerTerm).Value;
+    Self.TargetHandle := O.Handle;
   finally
     O.Free;
   end;
+end;
+
+//******************************************************************************
+//* TMessageQueueHandleMsg                                                     *
+//******************************************************************************
+//* TMessageQueueHandleMsg Public methods **************************************
+
+constructor TMessageQueueHandleMsg.Create(ReplyTo: TProcessID; Handle: HWND);
+var
+  Params: TTuple;
+begin
+  Params := TTuple.Create;
+  try
+    Params.AddInteger(Handle);
+    
+    inherited Create(MessageQueueHandleName, ReplyTo, Params);
+  finally
+    Params.Free;
+  end;
+end;
+
+//* TMessageQueueHandleMsg Private methods *************************************
+
+function TMessageQueueHandleMsg.GetHandle: HWND;
+begin
+  Result := (Self.Parameters[0] as TIntegerTerm).Value;
 end;
 
 end.
