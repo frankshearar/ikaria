@@ -215,15 +215,10 @@ begin
 end;
 
 procedure TestTClientTcpConnectionActor.MarkClosed(Msg: TTuple);
-begin
-  Self.Closed := true;
-end;
-
-procedure TestTClientTcpConnectionActor.MarkConnected(Msg: TTuple);
 var
   O: TMessageTuple;
 begin
-  Self.Connected := true;
+  Self.Closed := true;
 
   O := TMessageTuple.Overlay(Msg);
   try
@@ -232,6 +227,12 @@ begin
   finally
     O.Free;
   end;
+end;
+
+procedure TestTClientTcpConnectionActor.MarkConnected(Msg: TTuple);
+
+begin
+  Self.Connected := true;
 end;
 
 function TestTClientTcpConnectionActor.MatchMessageName(Msg: TTuple; Name: String): Boolean;
