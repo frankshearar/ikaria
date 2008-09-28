@@ -234,7 +234,7 @@ end;
 
 procedure TPingPongDemo.NextFibClick(Sender: TObject);
 var
-  AskForNext: TTuple;
+  AskForNext: TMessageTuple;
   Next:       TTuple;
 begin
   if (Self.NextFibber = '') then

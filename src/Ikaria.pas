@@ -322,6 +322,7 @@ type
     MsgTable: TActorMessageTable;
     ParentID: TProcessID;
 
+    procedure BeforeExit(Msg: TTuple); virtual;
     function  FindExit(Msg: TTuple): Boolean;
     function  FindKill(Msg: TTuple): Boolean;
     function  MatchAny(Msg: TTuple): Boolean;
@@ -374,13 +375,17 @@ type
   protected
     function Whois(PID: TProcessID): TActorMailbox; virtual;
   public
+    procedure Exit(Target: TProcessID); overload;
+    procedure Exit(Target: TProcessID; Reason: TTuple); overload; virtual;
+    procedure Kill(Target: TProcessID);
     function  NextPID: TProcessID; virtual;
     function  NextTag: String; virtual;
     procedure PrimitiveLink(LinkingPID, LinkedPID: TProcessID); virtual;
     function  PrimitiveReceive(Mailbox: TActorMailbox; Table: TActorMessageTable): Boolean; virtual;
     function  PrimitiveRegisterActor(A: TActorMailbox): TProcessID; virtual;
     procedure PrimitiveSend(Sender, Target: TProcessID; Msg: TTuple); virtual;
-    function  PrimitiveSpawn(ActorType: TActorClass; Parent: TProcessID): TProcessID; virtual;
+    function  PrimitiveSpawn(ActorType: TActorClass; Parent: TProcessID): TProcessID; overload; virtual;
+    function  PrimitiveSpawn(T: TThunk): TProcessID; overload; virtual;
     function  PrimitiveSpawnLink(ActorType: TActorClass; Parent: TProcessID): TProcessID; virtual;
     procedure PrimitiveUnregisterActor(A: TActorMailbox); virtual;
   end;
@@ -407,6 +412,7 @@ type
     function  PrimitiveRegisterActor(A: TActorMailbox): TProcessID; override;
     procedure PrimitiveSend(Sender, Target: TProcessID; Msg: TTuple); override;
     function  PrimitiveSpawn(ActorType: TActorClass; Parent: TProcessID): TProcessID; override;
+    function  PrimitiveSpawn(T: TThunk): TProcessID; override;
     function  PrimitiveSpawnLink(ActorType: TActorClass; Parent: TProcessID): TProcessID; override;
     procedure PrimitiveUnregisterActor(A: TActorMailbox); override;
   end;
@@ -425,7 +431,7 @@ procedure Kill(Target: TProcessID);
 
 // Send a message to a particular actor, and wait for a response. Return the
 // response, or fail after a timeout.
-function RPC(Target: TProcessID; Msg: TTuple; Timeout: Cardinal): TTuple;
+function RPC(Target: TProcessID; Msg: TMessageTuple; Timeout: Cardinal): TTuple;
 
 // Send a message to a particular Actor.
 procedure SendActorMessage(Target: TProcessID; Msg: TTuple);
@@ -457,6 +463,10 @@ type
   TActorMsgProc    = procedure(PID: String; Data: TTuple);
   TMessageSendProc = procedure(Sender, Target: TProcessID; Msg: TActorMessage);
 
+var
+  StandardWaitTime: Cardinal;
+
+
 const
   OneMillisecond = 1/86400/1000; // One Millisecond in TDateTime format.
   OneSecond      = 1000; // milliseconds
@@ -473,17 +483,14 @@ implementation
 //* Unit Private functions/procedures                                          *
 //******************************************************************************
 
+procedure RaiseAbstractError(ClassName, FunctionName: String);
+begin
+  raise EAbstractError.Create(Format('%s must override %s', [ClassName, FunctionName]));
+end;
+
 function WithoutFirstAndLastChars(const S: String): String;
 begin
   Result := Copy(S, 2, Length(S) - 2);
-end;
-
-function ConstructUUID: String;
-var
-  NewGuid: TGUID;
-begin
-  CreateGUID(NewGuid);
-  Result := Lowercase(WithoutFirstAndLastChars(GUIDToString(NewGuid)));
 end;
 
 procedure NotifyOfActorCreation(ActorType, PID: String);
@@ -508,33 +515,25 @@ end;
 //* Unit Public functions/procedures                                           *
 //******************************************************************************
 
-procedure ExitActor(Target: TProcessID; Reason: TTuple);
+function ConstructUUID: String;
 var
-  E: TMessageTuple;
+  NewGuid: TGUID;
 begin
-  E := TMessageTuple.Create(ExitMsg, TActor.RootActor, Reason);
-  try
-    SendActorMessage(Target, E);
-  finally
-    E.Free;
-  end;
+  CreateGUID(NewGuid);
+  Result := Lowercase(WithoutFirstAndLastChars(GUIDToString(NewGuid)));
+end;
+
+procedure ExitActor(Target: TProcessID; Reason: TTuple);
+begin
+  DefaultEnv.Exit(Target, Reason);
 end;
 
 procedure Kill(Target: TProcessID);
-var
-  Kill: TTuple;
 begin
-  Kill := TTuple.Create;
-  try
-    Kill.AddString(ExitReasonKill);
-
-    ExitActor(Target, Kill);
-  finally
-    Kill.Free;
-  end;
+  DefaultEnv.Kill(Target);
 end;
 
-function RPC(Target: TProcessID; Msg: TTuple; Timeout: Cardinal): TTuple;
+function RPC(Target: TProcessID; Msg: TMessageTuple; Timeout: Cardinal): TTuple;
 var
   Intf:        TActorInterfaceForRPC;
   ReroutedMsg: TTuple;
@@ -570,17 +569,8 @@ begin
 end;
 
 function Spawn(T: TThunk): TProcessID;
-var
-  Thunker: TThunkActor;
 begin
-  // This needs to hook into the Primitive layer.
-
-  Thunker := TThunkActor.Create(DefaultEnv, TActor.RootActor);
-  Thunker.Thunk := T;
-
-  Result := Thunker.PID;
-
-  TActorRunner.Create(Thunker);
+  Result := DefaultEnv.PrimitiveSpawn(T);
 end;
 
 //******************************************************************************
@@ -596,7 +586,9 @@ end;
 
 function TTerm.Copy: TTerm;
 begin
-  raise EAbstractError.Create(Self.ClassName + ' must override Copy');
+  Result := nil;
+  
+  RaiseAbstractError(Self.ClassName, 'Copy');
 end;
 
 function TTerm.Equals(Other: TTerm): Boolean;
@@ -1360,7 +1352,7 @@ begin
   // message matching a condition in Table.
 
   while not Self.Terminated do begin
-    if Self.WaitForMessage(OneSecond) then begin
+    if Self.WaitForMessage(StandardWaitTime) then begin
       Self.Environment.PrimitiveReceive(Self.Mailbox, Table);
       Break;
     end;
@@ -1388,7 +1380,7 @@ begin
   Finished := false;
 
   while not Self.Terminated and (Now < EndTime) do begin
-    if Self.WaitForMessage(OneSecond) then begin
+    if Self.WaitForMessage(StandardWaitTime) then begin
       Finished := Self.Environment.PrimitiveReceive(Self.Mailbox, Table);
       if Finished then Break;
     end;
@@ -1599,6 +1591,11 @@ end;
 
 //* TActor Protected methods ***************************************************
 
+procedure TActor.BeforeExit(Msg: TTuple);
+begin
+  // By default do nothing.
+end;
+
 function TActor.FindExit(Msg: TTuple): Boolean;
 begin
   Result := Self.MatchMessageName(Msg, ExitMsg);
@@ -1662,6 +1659,7 @@ end;
 
 procedure TActor.ReactToExit(Msg: TTuple);
 begin
+  Self.BeforeExit(Msg);
   Self.Terminate;
 end;
 
@@ -1741,61 +1739,106 @@ end;
 //******************************************************************************
 //* TActorEnvironment Public methods *******************************************
 
+procedure TActorEnvironment.Exit(Target: TProcessID);
+var
+  E: TMessageTuple;
+begin
+  E := TMessageTuple.Create(ExitMsg, TActor.RootActor);
+  try
+    Self.PrimitiveSend('', Target, E);
+  finally
+    E.Free;
+  end;
+end;
+
+procedure TActorEnvironment.Exit(Target: TProcessID; Reason: TTuple);
+var
+  E: TMessageTuple;
+begin
+  E := TMessageTuple.Create(ExitMsg, TActor.RootActor, Reason);
+  try
+    Self.PrimitiveSend('', Target, E);
+  finally
+    E.Free;
+  end;
+end;
+
+procedure TActorEnvironment.Kill(Target: TProcessID);
+var
+  Kill: TTuple;
+begin
+  Kill := TTuple.Create;
+  try
+    Kill.AddString(ExitReasonKill);
+
+    ExitActor(Target, Kill);
+  finally
+    Kill.Free;
+  end;
+end;
+
 function TActorEnvironment.NextPID: TProcessID;
 begin
   Result := '';
 
-  raise EAbstractError.Create(Self.ClassName + ' must override NextPID');
+  RaiseAbstractError(Self.ClassName, ' NextPID');
 end;
 
 function TActorEnvironment.NextTag: String;
 begin
   Result := '';
 
-  raise EAbstractError.Create(Self.ClassName + ' must override NextTag');
+  RaiseAbstractError(Self.ClassName, 'NextTag');
 end;
 
 procedure TActorEnvironment.PrimitiveLink(LinkingPID, LinkedPID: TProcessID);
 begin
-  raise EAbstractError.Create(Self.ClassName + ' must override PrimitiveLink');
+  RaiseAbstractError(Self.ClassName, 'PrimitiveLink');
 end;
 
 function TActorEnvironment.PrimitiveReceive(Mailbox: TActorMailbox; Table: TActorMessageTable): Boolean;
 begin
   Result := false;
 
-  raise EAbstractError.Create(Self.ClassName + ' must override PrimitiveReceive');
+  RaiseAbstractError(Self.ClassName, 'PrimitiveReceive');
 end;
 
 function TActorEnvironment.PrimitiveRegisterActor(A: TActorMailbox): TProcessID;
 begin
   Result := '';
 
-  raise EAbstractError.Create(Self.ClassName + ' must override PrimitiveRegisterActor');
+  RaiseAbstractError(Self.ClassName, 'PrimitiveRegisterActor');
 end;
 
 procedure TActorEnvironment.PrimitiveSend(Sender, Target: TProcessID; Msg: TTuple);
 begin
-  raise EAbstractError.Create(Self.ClassName + ' must override PrimitiveSend');
+  RaiseAbstractError(Self.ClassName, 'PrimitiveSend');
 end;
 
 function TActorEnvironment.PrimitiveSpawn(ActorType: TActorClass; Parent: TProcessID): TProcessID;
 begin
   Result := '';
 
-  raise EAbstractError.Create(Self.ClassName + ' must override PrimitiveSpawn');
+  RaiseAbstractError(Self.ClassName, 'PrimitiveSpawn(ActorType, PID)');
+end;
+
+function TActorEnvironment.PrimitiveSpawn(T: TThunk): TProcessID;
+begin
+  Result := '';
+
+  RaiseAbstractError(Self.ClassName, 'PrimitiveSpawn(Thunk)');
 end;
 
 function TActorEnvironment.PrimitiveSpawnLink(ActorType: TActorClass; Parent: TProcessID): TProcessID;
 begin
   Result := '';
 
-  raise EAbstractError.Create(Self.ClassName + ' must override PrimitiveSpawnLink');
+  RaiseAbstractError(Self.ClassName, 'PrimitiveSpawnLink');
 end;
 
 procedure TActorEnvironment.PrimitiveUnregisterActor(A: TActorMailbox);
 begin
-  raise EAbstractError.Create(Self.ClassName + ' must override PrimitiveUnregisterActor');
+  RaiseAbstractError(Self.ClassName, 'PrimitiveUnregisterActor');
 end;
 
 //* TActorEnvironment Protected methods ****************************************
@@ -1804,7 +1847,7 @@ function TActorEnvironment.Whois(PID: TProcessID): TActorMailbox;
 begin
   Result := nil;
 
-  raise EAbstractError.Create(Self.ClassName + ' must override Whois');
+  RaiseAbstractError(Self.ClassName, 'Whois');
 end;
 
 //******************************************************************************
@@ -1959,7 +2002,21 @@ begin
   TActorRunner.Create(A);
 end;
 
-function TThreadedActorEnvironment.PrimitiveSpawnLink(ActorType: TActorClass; Parent: TProcessID): TProcessID; 
+function TThreadedActorEnvironment.PrimitiveSpawn(T: TThunk): TProcessID;
+var
+  Thunker: TThunkActor;
+begin
+  // This needs to hook into the Primitive layer.
+
+  Thunker := TThunkActor.Create(Self, TActor.RootActor);
+  Thunker.Thunk := T;
+
+  Result := Thunker.PID;
+
+  TActorRunner.Create(Thunker);
+end;
+
+function TThreadedActorEnvironment.PrimitiveSpawnLink(ActorType: TActorClass; Parent: TProcessID): TProcessID;
 var
   Child: TActor;
 begin
@@ -2005,5 +2062,6 @@ begin
 end;
 
 initialization
-  DefaultEnv := TThreadedActorEnvironment.Create;
+  DefaultEnv       := TThreadedActorEnvironment.Create;
+  StandardWaitTime := OneSecond;
 end.

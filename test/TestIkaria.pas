@@ -265,7 +265,7 @@ type
 
   TestActorFunctions = class(TActorTestCase)
   private
-    TestMsg:    TTuple;
+    TestMsg:    TMessageTuple;
     ThunkEvent: TEvent;
     ThunkRan:   Boolean;
 

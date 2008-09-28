@@ -22,6 +22,7 @@ type
     procedure ForwardToMessageQueue(Msg: TTuple);
     procedure SetMessageQueueHandle(Msg: TTuple);
   protected
+    procedure BeforeExit(Msg: TTuple); override;
     procedure RegisterActions(Table: TActorMessageTable); override;
   end;
 
@@ -35,6 +36,14 @@ implementation
 //* TWindowsMessageForwarder                                                   *
 //******************************************************************************
 //* TWindowsMessageForwarder Protected methods *********************************
+
+procedure TWindowsMessageForwarder.BeforeExit(Msg: TTuple);
+begin
+  inherited BeforeExit(Msg);
+
+  // Notify the message queue of my exit.
+  Self.ForwardToMessageQueue(Msg);
+end;
 
 procedure TWindowsMessageForwarder.RegisterActions(Table: TActorMessageTable);
 begin
