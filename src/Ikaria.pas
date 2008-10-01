@@ -11,7 +11,6 @@ unit Ikaria;
 
 
 // TODO:
-// * Terminating whenever an exit is received
 // * Trapping of exits (when a flag is set)
 // * Should receiving exits be pushed into the primitive layer? Right now it's
 //   possible to have a badly- or maliciously-written Actor refuse to terminate
@@ -247,7 +246,7 @@ type
     Lock:        TCriticalSection;
     Mailbox:     TActorMailbox;
     MsgEvent:    TEvent;
-    PendingMsgs:  Cardinal;
+    PendingMsgs: Cardinal;
 
     function  GetPID: TProcessID;
     procedure NewMessageArrived(Sender: TObject);
@@ -459,10 +458,10 @@ const
   MessageSentMsg  = 'Actor %s sent message to actor %s: %s';
 
 const
-  ExitMsg                = 'exit';
-  ExitReasonException    = '%s: %s';
-  ExitReasonNormal       = 'normal';
-  ExitReasonKill         = 'kill';
+  ExitMsg             = 'exit';
+  ExitReasonException = '%s: %s';
+  ExitReasonNormal    = 'normal';
+  ExitReasonKill      = 'kill';
 
 // String conversion
 const
@@ -1036,7 +1035,8 @@ end;
 procedure TActorMailbox.AddMessage(Msg: TActorMessage);
 begin
   // Store a copy of Msg in our mailbox.
-  // Move any messages in the save queue back into the mailbox proper (preserving arrival order).
+  // Move any messages in the save queue back into the mailbox proper
+  // (preserving arrival order).
 
   Self.Lock.Acquire;
   try
