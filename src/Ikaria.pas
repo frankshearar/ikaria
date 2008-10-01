@@ -357,12 +357,15 @@ type
   // from its Execute method), I destroy the Actor.
   TActorRunner = class(TThread)
   private
-    Actor: TActor;
+    Actor:   TActor;
+    fOnExit: TNotifyEvent;
   protected
     procedure Execute; override;
   public
     constructor Create(A: TActor);
     destructor  Destroy; override;
+
+    property OnExit: TNotifyEvent read fOnExit write fOnExit;
   end;
 
   // I represent the environment in which Actors run. Subclasses might use any
@@ -1731,7 +1734,12 @@ end;
 
 procedure TActorRunner.Execute;
 begin
-  Self.Actor.Execute;
+  try
+    Self.Actor.Execute;
+  finally
+      if Assigned(Self.fOnExit) then
+      Self.fOnExit(Self);
+  end;
 end;
 
 //******************************************************************************
