@@ -1435,6 +1435,8 @@ end;
 
 procedure TActorInterface.DoNothing(Msg: TTuple);
 begin
+  // Often, this method is used to turn an asynchronous communication into a
+  // synchronous _procedure_ call. 
 end;
 
 //* TActorInterface Private methods ********************************************
@@ -1569,8 +1571,6 @@ end;
 
 destructor TActor.Destroy;
 begin
-  // Notify all known actors of freeing!
-
   Self.MsgTable.Free;
 
   inherited Destroy;
