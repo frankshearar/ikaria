@@ -396,8 +396,11 @@ end;
 procedure TClientTcpConnectionActor.ReceiveData(Timeout: Cardinal);
 begin
   Self.Connection.ReadFromStack(true, Timeout, false);
-  Self.ReportReceivedData(Self.Connection);
-  Self.Connection.InputBuffer.Remove(Self.Connection.InputBuffer.Size);
+
+  if (Self.Connection.InputBuffer.Size > 0) then begin
+    Self.ReportReceivedData(Self.Connection);
+    Self.Connection.InputBuffer.Remove(Self.Connection.InputBuffer.Size);
+  end;
 end;
 
 procedure TClientTcpConnectionActor.SendData(Msg: TTuple);
