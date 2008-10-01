@@ -96,10 +96,14 @@ type
     Connection: TIdTcpClient;
     Controller: TProcessID;
     Timeout:    Cardinal;
+
+    procedure CloseConnection(Connection: TIdTCPConnection; Controller: TProcessID);
+    procedure Disconnected(Sender: TObject);
     procedure ReportReceivedData(C: TIdTcpConnection);
     procedure SignalClosureTo(Target: TProcessID; Reason: String = '');
     procedure SignalDataTo(Target: TProcessID; Data: String);
     procedure SignalOpeningTo(Target: TProcessID);
+    procedure TryReceiveData(Timeout: Cardinal);
   protected
     procedure RegisterActions(Table: TActorMessageTable); override;
     procedure Run; override;
@@ -125,6 +129,7 @@ type
     fPeerBinding:  TLocationTuple;
     fTimeout:      Cardinal;
 
+    function  FindClosed(Msg: TTuple): Boolean;
     function  FindOpened(Msg: TTuple): Boolean;
     procedure RaiseConnectTimeoutException;
     procedure ReactToOpened(Msg: TTuple);
@@ -334,6 +339,8 @@ begin
 
   Self.Connection := TIdTcpClient.Create(nil);
   Self.Timeout := 20*OneSecond;
+
+  Self.Connection.OnDisconnected := Self.Disconnected;
 end;
 
 destructor TClientTcpConnectionActor.Destroy;
@@ -345,11 +352,7 @@ end;
 
 procedure TClientTcpConnectionActor.Close(Msg: TTuple);
 begin
-  if Self.Connection.Connected then begin
-    Self.Connection.Disconnect;
-
-    Self.SignalClosureTo(Self.Controller);
-  end;
+  Self.CloseConnection(Self.Connection, Self.Controller);
 end;
 
 procedure TClientTcpConnectionActor.Connect(Msg: TTuple);
@@ -357,7 +360,7 @@ var
   Conn: TOpenMsg;
 begin
   if Self.Connection.Connected then
-    Self.Connection.Disconnect;
+    Self.CloseConnection(Self.Connection, Self.Controller);
 
   Conn := TOpenMsg.Overlay(Msg);
   try
@@ -431,12 +434,22 @@ begin
   while not Self.Terminated do begin
     Self.Receive(Self.MsgTable, FiftyMilliseconds);
 
-    if Self.Connected then
-      Self.ReceiveData(FiftyMilliseconds);
+    Self.TryReceiveData(FiftyMilliseconds);
   end;
 end;
 
 //* TClientTcpConnectionActor Private methods **********************************
+
+procedure TClientTcpConnectionActor.CloseConnection(Connection: TIdTCPConnection; Controller: TProcessID);
+begin
+  if Connection.Connected then
+    Connection.Disconnect;
+end;
+
+procedure TClientTcpConnectionActor.Disconnected(Sender: TObject);
+begin
+  Self.SignalClosureTo(Controller);
+end;
 
 procedure TClientTcpConnectionActor.ReportReceivedData(C: TIdTcpConnection);
 var
@@ -494,6 +507,18 @@ begin
   end;
 end;
 
+procedure TClientTcpConnectionActor.TryReceiveData(Timeout: Cardinal);
+begin
+  if Self.Connection.Connected then begin
+    try
+      Self.ReceiveData(FiftyMilliseconds);
+    except
+      on EIdConnClosedGracefully do
+        Self.SignalClosureTo(Self.Controller);
+    end;
+  end;
+end;
+
 //******************************************************************************
 //* TClientTcpConnectionActorInterface                                         *
 //******************************************************************************
@@ -521,6 +546,8 @@ end;
 procedure TClientTcpConnectionActorInterface.Close;
 begin
   Self.Send(Self.Client, CloseConnectionMsg);
+
+//  Self.Receive(Self.FindClosed, Self.DoNothing, Self.Timeout, Self.RaiseConnectTimeoutException);
 end;
 
 procedure TClientTcpConnectionActorInterface.Connect(Address: String; Port: Cardinal; Transport: String = 'TCP');
@@ -561,6 +588,11 @@ begin
 end;
 
 //* TClientTcpConnectionActorInterface Private methods *************************
+
+function TClientTcpConnectionActorInterface.FindClosed(Msg: TTuple): Boolean;
+begin
+  Result := Self.MatchMessageName(Msg, ClosedConnectionMsg)
+end;
 
 function TClientTcpConnectionActorInterface.FindOpened(Msg: TTuple): Boolean;
 begin
