@@ -1878,12 +1878,12 @@ end;
 
 destructor TThreadedActorEnvironment.Destroy;
 begin
-  Self.ActorLock.Acquire;
+  Self.Lock;
   try
     Self.UsedPIDs.Free;
     Self.Actors.Free;
   finally
-    Self.ActorLock.Release;
+    Self.Unlock;
   end;
   Self.ActorLock.Free;
   Self.TagLock.Free;
@@ -1893,7 +1893,7 @@ end;
 
 function TThreadedActorEnvironment.NextPID: TProcessID;
 begin
-  Self.ActorLock.Acquire;
+  Self.Lock;
   try
     repeat
       Result := ConstructUUID;
@@ -1901,7 +1901,7 @@ begin
 
     UsedPIDs.Add(Result);
   finally
-    Self.ActorLock.Release;
+    Self.Unlock;
   end;
 end;
 
@@ -1921,7 +1921,7 @@ procedure TThreadedActorEnvironment.PrimitiveLink(LinkingPID, LinkedPID: TProces
 var
   A, B: TActorMailbox;
 begin
-  Self.ActorLock.Acquire;
+  Self.Lock;
   try
     A := Self.Whois(LinkingPID);
     B := Self.Whois(LinkedPID);
@@ -1931,7 +1931,7 @@ begin
       B.LinkSet.Add(A.PID);
     end;
   finally
-    Self.ActorLock.Release;
+    Self.Unlock;
   end;
 end;
 
@@ -1956,13 +1956,13 @@ end;
 
 function TThreadedActorEnvironment.PrimitiveRegisterActor(A: TActorMailbox): TProcessID; 
 begin
-  Self.ActorLock.Acquire;
+  Self.Lock;
   try
     Result := NextPID;
 
     Self.Actors.AddObject(Result, A);
   finally
-    Self.ActorLock.Release;
+    Self.Unlock;
   end;
 end;
 
@@ -1971,14 +1971,14 @@ procedure TThreadedActorEnvironment.PrimitiveSend(Sender, Target: TProcessID; Ms
   var
     TargetMbox: TActorMailbox;
   begin
-    Self.ActorLock.Acquire;
+    Self.Lock;
     try
       TargetMbox := Self.Whois(Target);
 
       if Assigned(TargetMbox) then
         TargetMbox.AddMessage(Msg);
     finally
-      Self.ActorLock.Release;
+      Self.Unlock;
     end;
   end;
 var
@@ -2040,14 +2040,14 @@ procedure TThreadedActorEnvironment.PrimitiveUnregisterActor(A: TActorMailbox);
 var
   Index: Integer;
 begin
-  Self.ActorLock.Acquire;
+  Self.Lock;
   try
     Index := Self.Actors.IndexOf(A.PID);
 
     if (Index <> -1) then
       Self.Actors.Delete(Index);
   finally
-    Self.ActorLock.Release;
+    Self.Unlock;
   end;
 end;
 
