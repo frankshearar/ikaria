@@ -397,11 +397,19 @@ type
   private
     Actors:    TStringList;
     ActorLock: TCriticalSection; // Used to lock access to Actors.
+    Runners:   TObjectList;
     UsedPIDs:  TStringList;
 
     // Tag generation
     NextAvailableTag: Int64;
     TagLock:          TCriticalSection;
+
+    procedure ActivateActor(A: TActor);
+    procedure Deactivate(L: TStringList);
+    procedure Lock;
+    procedure RemoveRunner(TerminatedThread: TObject);
+    procedure Unlock;
+    procedure WaitForAllActorsExit(L: TStringList);
   protected
     function Whois(PID: TProcessID): TActorMailbox; override;
   public
@@ -1719,8 +1727,6 @@ begin
 
   Self.Actor           := A;
   Self.FreeOnTerminate := true;
-
-  Self.Resume;
 end;
 
 destructor TActorRunner.Destroy;
@@ -1869,6 +1875,7 @@ begin
 
   Self.ActorLock := TCriticalSection.Create;
   Self.Actors    := TStringList.Create;
+  Self.Runners   := TObjectList.Create(false);
   Self.UsedPIDs  := TStringList.Create;
 
   // Tag generation
@@ -1878,8 +1885,12 @@ end;
 
 destructor TThreadedActorEnvironment.Destroy;
 begin
+  Self.Deactivate(Self.Actors);
+  Self.WaitForAllActorsExit(Self.Actors);
+
   Self.Lock;
   try
+    Self.Runners.Free;
     Self.UsedPIDs.Free;
     Self.Actors.Free;
   finally
@@ -1917,7 +1928,7 @@ begin
   end;
 end;
 
-procedure TThreadedActorEnvironment.PrimitiveLink(LinkingPID, LinkedPID: TProcessID); 
+procedure TThreadedActorEnvironment.PrimitiveLink(LinkingPID, LinkedPID: TProcessID);
 var
   A, B: TActorMailbox;
 begin
@@ -1954,7 +1965,7 @@ begin
   end;
 end;
 
-function TThreadedActorEnvironment.PrimitiveRegisterActor(A: TActorMailbox): TProcessID; 
+function TThreadedActorEnvironment.PrimitiveRegisterActor(A: TActorMailbox): TProcessID;
 begin
   Self.Lock;
   try
@@ -2004,28 +2015,25 @@ begin
   end;
 end;
 
-function TThreadedActorEnvironment.PrimitiveSpawn(ActorType: TActorClass; Parent: TProcessID): TProcessID; 
+function TThreadedActorEnvironment.PrimitiveSpawn(ActorType: TActorClass; Parent: TProcessID): TProcessID;
 var
   A: TActor;
 begin
   A := ActorType.Create(Self, Parent);
-  Result := A.PID;
 
-  TActorRunner.Create(A);
+  Result := A.PID;
+  Self.ActivateActor(A);
 end;
 
 function TThreadedActorEnvironment.PrimitiveSpawn(T: TThunk): TProcessID;
 var
   Thunker: TThunkActor;
 begin
-  // This needs to hook into the Primitive layer.
-
   Thunker := TThunkActor.Create(Self, TActor.RootActor);
   Thunker.Thunk := T;
 
   Result := Thunker.PID;
-
-  TActorRunner.Create(Thunker);
+  Self.ActivateActor(Thunker);
 end;
 
 function TThreadedActorEnvironment.PrimitiveSpawnLink(ActorType: TActorClass; Parent: TProcessID): TProcessID;
@@ -2036,6 +2044,8 @@ begin
   PrimitiveLink(Parent, Child.PID);
 
   Result := Child.PID;
+
+  Self.ActivateActor(Child);
 
   TActorRunner.Create(Child);
 end;
@@ -2071,6 +2081,70 @@ begin
 
   if (Index <> -1) then
     Result := Self.Actors.Objects[Index] as TActorMailbox;
+end;
+
+//* TThreadedActorEnvironment Private methods **********************************
+
+procedure TThreadedActorEnvironment.ActivateActor(A: TActor);
+var
+  R: TActorRunner;
+begin
+  R := TActorRunner.Create(A);
+  R.OnExit := Self.RemoveRunner;
+
+  Self.Lock;
+  try
+    Self.Runners.Add(R);
+  finally
+    Self.Unlock;
+  end;
+  R.Resume;
+end;
+
+procedure TThreadedActorEnvironment.Deactivate(L: TStringList);
+var
+  I: Integer;
+begin
+  Self.Lock;
+  try
+    for I := 0 to L.Count - 1 do
+      Self.Kill(L[I]);
+  finally
+    Self.Unlock;
+  end;
+end;
+
+procedure TThreadedActorEnvironment.Lock;
+begin
+  Self.ActorLock.Acquire;
+end;
+
+procedure TThreadedActorEnvironment.RemoveRunner(TerminatedThread: TObject);
+begin
+  Self.Lock;
+  try
+    Self.Runners.Remove(TerminatedThread);
+  finally
+     Self.Unlock;
+  end;
+end;
+
+procedure TThreadedActorEnvironment.Unlock;
+begin
+  Self.ActorLock.Release;
+end;
+
+procedure TThreadedActorEnvironment.WaitForAllActorsExit(L: TStringList);
+begin
+  while true do begin
+    Self.Lock;
+    try
+      if (L.Count = 0) then Break;
+    finally
+      Self.Unlock;
+    end;
+    Sleep(OneSecond div 2);
+  end;
 end;
 
 initialization
