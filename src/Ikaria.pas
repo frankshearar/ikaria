@@ -1992,9 +1992,13 @@ begin
   try
     AMsg.Data := Msg.Copy as TTuple;
 
-    DeliverMsg(Target, AMsg);
-
+    // We log before the actual delivery because it's possible for the receiving
+    // Actor to process the message and deliver another message before we reach
+    // the next statement after DeliverMsg. In other words, logging first means
+    // that we preserve the time ordering of messages any log you might store.
     NotifyOfMessageSend(Sender, Target, AMsg);
+
+    DeliverMsg(Target, AMsg);
   finally
     AMsg.Free;
   end;
