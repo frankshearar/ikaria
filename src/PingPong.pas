@@ -46,7 +46,9 @@ type
     procedure ReactToPong(Msg: TTuple);
   protected
     procedure RegisterActions(Table: TActorMessageTable); override;
-    procedure Run; override;
+  public
+    procedure Setup; override;
+    procedure Step; override;
   end;
 
   TPongActor = class(TActor)
@@ -94,7 +96,7 @@ type
     function  FindSetup(Msg: TTuple): Boolean;
     function  FindTick(Msg: TTuple): Boolean;
     procedure RunBenchmark(Msg: TTuple);
-    procedure Setup(Msg: TTuple);
+    procedure SetupBenchmark(Msg: TTuple);
     procedure SignalSetupFinished(Msg: TTuple);
   protected
     procedure RegisterActions(Table: TActorMessageTable); override;
@@ -107,7 +109,7 @@ type
     function  FindSetup(Msg: TTuple): Boolean;
     function  FindTick(Msg: TTuple): Boolean;
     procedure ForwardTick(Msg: TTuple);
-    procedure Setup(Msg: TTuple);
+    procedure SetUpForwarding(Msg: TTuple);
   protected
     procedure RegisterActions(Table: TActorMessageTable); override;
   end;
@@ -269,6 +271,20 @@ end;
 //******************************************************************************
 //* TPingActor                                                                 *
 //******************************************************************************
+//* TPingActor Public methods **************************************************
+
+procedure TPingActor.Setup;
+begin
+  Self.Ponger := Self.SpawnLink(TPongActor);
+end;
+
+procedure TPingActor.Step;
+begin
+  Self.Ping(Self.Ponger);
+
+  inherited Step;
+end;
+
 //* TPingActor Protected methods ***********************************************
 
 procedure TPingActor.RegisterActions(Table: TActorMessageTable);
@@ -295,14 +311,6 @@ begin
   LogToDemo('', PongName, 0, 'PingPongDemo', LevelInfo, 0, Self.PID);
   Sleep(1000);
   Self.Ping(Self.Ponger);
-end;
-
-procedure TPingActor.Run;
-begin
-  Self.Ponger := Self.SpawnLink(TPongActor);
-  Self.Ping(Self.Ponger);
-
-  inherited Run;
 end;
 
 //******************************************************************************
@@ -425,7 +433,7 @@ end;
 procedure TRingBenchmark.RegisterActions(Table: TActorMessageTable);
 begin
   Table.Add(Self.FindGo, Self.RunBenchmark);
-  Table.Add(Self.FindSetup, Self.Setup);
+  Table.Add(Self.FindSetup, Self.SetupBenchmark);
   Table.Add(Self.FindFinished, Self.SignalSetupFinished);
 end;
 
@@ -463,7 +471,7 @@ begin
   Self.Send(Self.Caller, 'gone');
 end;
 
-procedure TRingBenchmark.Setup(Msg: TTuple);
+procedure TRingBenchmark.SetupBenchmark(Msg: TTuple);
 var
   Params:      TMessageTuple;
   SetupParams: TTuple;
@@ -502,7 +510,7 @@ end;
 
 procedure TForwarder.RegisterActions(Table: TActorMessageTable);
 begin
-  Table.Add(Self.FindSetup, Self.Setup);
+  Table.Add(Self.FindSetup, Self.SetUpForwarding);
   Table.Add(Self.FindTick, Self.ForwardTick);
 end;
 
@@ -523,7 +531,7 @@ begin
   Self.Send(Self.Next, 'tick');
 end;
 
-procedure TForwarder.Setup(Msg: TTuple);
+procedure TForwarder.SetUpForwarding(Msg: TTuple);
 var
   N:           Integer;
   Params:      TMessageTuple;

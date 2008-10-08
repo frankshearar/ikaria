@@ -17,12 +17,12 @@ uses
   IkariaForWindows in 'src\IkariaForWindows.pas',
   PingPong in 'src\PingPong.pas' {PingPongDemo},
   TestClientTcpConnectionActor in 'test\TestClientTcpConnectionActor.pas',
-  TestIkaria in 'test\TestIkaria.pas',  
+  TestIkaria in 'test\TestIkaria.pas',
   TestIkariaForWindows in 'test\TestIkariaForWindows.pas';
 
 {$R *.res}
 
-{$DEFINE DEMO}
+//{$DEFINE DEMO}
 
 begin
   {$IFNDEF DEMO}

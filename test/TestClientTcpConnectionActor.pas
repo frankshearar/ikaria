@@ -54,7 +54,6 @@ type
     procedure StoreReceivedData(Msg: TTuple);
     procedure Timeout;
     procedure WaitFor(E: TEvent; Timeout: Cardinal; Msg: String);
-    procedure WaitForTimeout(E: TEvent; Timeout: Cardinal; Msg: String);
   public
     procedure SetUp; override;
     procedure TearDown; override;
@@ -285,12 +284,6 @@ end;
 procedure TestTClientTcpConnectionActor.WaitFor(E: TEvent; Timeout: Cardinal; Msg: String);
 begin
   if (wrSignaled <> E.WaitFor(Timeout)) then
-    Fail(Msg);
-end;
-
-procedure TestTClientTcpConnectionActor.WaitForTimeout(E: TEvent; Timeout: Cardinal; Msg: String);
-begin
-  if (wrTimeout <> E.WaitFor(Timeout)) then
     Fail(Msg);
 end;
 

@@ -169,6 +169,7 @@ type
   TActOnMessage = procedure(Msg: TTuple) of object;
 
   TActorMessageTable = class;
+  TActorInterface = class;
 
   // I store messages sent to an Actor.
   TActorMailbox = class(TObject)
@@ -189,7 +190,7 @@ type
     procedure RestoreSaveQueue;
     procedure SetOnMessageArrived(Value: TNotifyEvent);
   public
-    constructor Create(E: TActorEnvironment);
+    constructor Create(Owner: TActorInterface);
     destructor  Destroy; override;
 
     procedure AddMessage(Msg: TActorMessage);
@@ -309,6 +310,12 @@ type
   // use threads - it could use processes, or fibres - or one thread might run several
   // cooperatively-multitasking Actors.
   //
+  // Conceptually, my execution is analogous to this:
+  //   SetUp;
+  //   while not Self.Terminated do
+  //     Step;
+  //   TearDown;
+  //
   // Also, I provide common matching functions - MatchAny, MatchMessageName,
   // etc. - to my subclasses.
   TActor = class(TActorInterface)
@@ -326,7 +333,6 @@ type
     function  FindKill(Msg: TTuple): Boolean;
     function  MatchAny(Msg: TTuple): Boolean;
     procedure RegisterActions(Table: TActorMessageTable); virtual;
-    procedure Run; virtual;
     procedure SendExceptionalExit(E: Exception);
     procedure SendNormalExit;
   public
@@ -335,16 +341,18 @@ type
     constructor Create(E: TActorEnvironment; Parent: TProcessID); virtual;
     destructor  Destroy; override;
 
-    procedure Execute;
+    procedure SetUp; virtual;
+    procedure Step; virtual;
+    procedure TearDown; virtual;
     procedure Terminate; reintroduce; virtual;
   end;
 
   TThunkActor = class(TActor)
   private
     fThunk: TThunk;
-  protected
-    procedure Run; override;
   public
+    procedure Step; override;
+
     property Thunk: TThunk read fThunk write fThunk;
   end;
 
@@ -998,11 +1006,11 @@ end;
 //******************************************************************************
 //* TActorMailbox Public methods ***********************************************
 
-constructor TActorMailbox.Create(E: TActorEnvironment);
+constructor TActorMailbox.Create(Owner: TActorInterface);
 begin
   inherited Create;
 
-  Self.Environment := E;
+  Self.Environment := Owner.Environment;
 
   Self.LinkSet := TStringList.Create;
   Self.LinkSet.Duplicates := dupIgnore;
@@ -1282,7 +1290,7 @@ begin
 
   Self.fTerminated := false;
   Self.Lock        := TCriticalSection.Create;
-  Self.Mailbox     := TActorMailbox.Create(Self.Environment);
+  Self.Mailbox     := TActorMailbox.Create(Self);
   Self.MsgEvent    := TSimpleEvent.Create;
   Self.PendingMsgs := 0;
 
@@ -1584,15 +1592,22 @@ begin
   inherited Destroy;
 end;
 
-procedure TActor.Execute;
+procedure TActor.SetUp;
 begin
-  try
-    Self.Run;
-    Self.SendNormalExit;
-  except
-    on E: Exception do
-      Self.SendExceptionalExit(E);
-  end;
+  // Put any initial message-sending stuff here. 
+end;
+
+procedure TActor.Step;
+begin
+  // Perform one step of a computation. By default, that means waiting for a
+  // message.
+
+  Self.Receive(Self.MsgTable);
+end;
+
+procedure TActor.TearDown;
+begin
+  // Put any cleanup stuff here.
 end;
 
 procedure TActor.Terminate;
@@ -1632,12 +1647,6 @@ end;
 procedure TActor.RegisterActions(Table: TActorMessageTable);
 begin
   // Register actions against conditions
-end;
-
-procedure TActor.Run;
-begin
-  while not Self.Terminated do
-    Self.Receive(Self.MsgTable);
 end;
 
 procedure TActor.SendExceptionalExit(E: Exception);
@@ -1709,11 +1718,12 @@ end;
 //******************************************************************************
 //* TThunkActor                                                                *
 //******************************************************************************
-//* TThunkActor Protected methods **********************************************
+//* TThunkActor Public methods *************************************************
 
-procedure TThunkActor.Run;
+procedure TThunkActor.Step;
 begin
   Self.Thunk;
+  Self.Terminate;
 end;
 
 //******************************************************************************
@@ -1741,7 +1751,19 @@ end;
 procedure TActorRunner.Execute;
 begin
   try
-    Self.Actor.Execute;
+    try
+      Self.Actor.SetUp;
+      try
+        while not Self.Terminated and not Self.Actor.Terminated do
+          Self.Actor.Step;
+      finally
+        Self.Actor.TearDown;
+      end;
+      Self.Actor.SendNormalExit;
+    except
+      on E: Exception do
+        Self.Actor.SendExceptionalExit(E);
+    end;
   finally
       if Assigned(Self.fOnExit) then
       Self.fOnExit(Self);
@@ -2046,8 +2068,6 @@ begin
   Result := Child.PID;
 
   Self.ActivateActor(Child);
-
-  TActorRunner.Create(Child);
 end;
 
 procedure TThreadedActorEnvironment.PrimitiveUnregisterActor(A: TActorMailbox);

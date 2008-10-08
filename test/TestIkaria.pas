@@ -144,6 +144,7 @@ type
 
   TestTActorMailbox = class(TTestCase)
   private
+    Actor:       TActorInterface;
     Environment: TActorEnvironment;
     Mbox:        TActorMailbox;
     M:           TActorMessage;
@@ -181,7 +182,6 @@ type
 
     procedure ActOnBarMsg(Msg: TTuple);
     procedure ActOnFooMsg(Msg: TTuple);
-    function  CreateBarMsg: TTuple;
     function  CreateFooMsg: TTuple;
     function  CreateMsgNamed(Name: String): TTuple;
     function  RecogniseBarMsg(Msg: TTuple): Boolean;
@@ -298,17 +298,17 @@ type
   end;
 
   TErrorActor = class(TActor)
-  protected
-    procedure Run; override;
   public
     class function ExpectedReason: String;
     class function ExceptionType: ExceptClass;
     class function ExceptionReason: String;
+
+    procedure Step; override;
   end;
 
   TSingleShotActor = class(TActor)
-  protected
-    procedure Run; override;
+  public
+    procedure Step; override;
   end;
 
 var
@@ -435,21 +435,21 @@ begin
   Result := 'Foo';
 end;
 
-//* TErrorActor Protected methods **********************************************
-
-procedure TErrorActor.Run;
+procedure TErrorActor.Step;
 begin
+  Self.Terminate;
   raise Self.ExceptionType.Create(Self.ExceptionReason);
 end;
 
 //******************************************************************************
 //* TSingleShotActor                                                           *
 //******************************************************************************
-//* TSingleShotActor Protected methods *****************************************
+//* TSingleShotActor Public methods ********************************************
 
-procedure TSingleShotActor.Run;
+procedure TSingleShotActor.Step;
 begin
   Self.Send(Self.ParentID, 'ping');
+  Self.Terminate;
 end;
 
 //******************************************************************************
@@ -1133,8 +1133,9 @@ begin
   inherited SetUp;
 
   Self.Environment := TThreadedActorEnvironment.Create;
+  Self.Actor       := TActorInterface.Create(Self.Environment);
 
-  Self.Mbox    := TActorMailbox.Create(Self.Environment);
+  Self.Mbox    := TActorMailbox.Create(Self.Actor);
   Self.M       := TActorMessage.Create(Self.Environment);
   Self.NewMsgs := false;
 end;
@@ -1143,6 +1144,7 @@ procedure TestTActorMailbox.TearDown;
 begin
   Self.M.Free;
   Self.Mbox.Free;
+  Self.Actor.Free;
   Self.Environment.Free;
 
   inherited TearDown;
@@ -1334,11 +1336,6 @@ end;
 procedure TestTActorInterface.ActOnFooMsg(Msg: TTuple);
 begin
   Self.ReceivedAFoo := true;
-end;
-
-function TestTActorInterface.CreateBarMsg: TTuple;
-begin
-  Result := Self.CreateMsgNamed(Self.BarName);
 end;
 
 function TestTActorInterface.CreateFooMsg: TTuple;

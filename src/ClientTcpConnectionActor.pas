@@ -106,7 +106,6 @@ type
     procedure TryReceiveData(Timeout: Cardinal);
   protected
     procedure RegisterActions(Table: TActorMessageTable); override;
-    procedure Run; override;
   public
     constructor Create(E: TActorEnvironment; Parent: TProcessID); override;
     destructor  Destroy; override;
@@ -119,6 +118,7 @@ type
     function  FindSendData(Msg: TTuple): Boolean;
     procedure ReceiveData(Timeout: Cardinal);
     procedure SendData(Msg: TTuple);
+    procedure Step; override;
   end;
 
   // I provide a nice "normal" interface to a ClientTcpConnectionActor.
@@ -417,6 +417,13 @@ begin
   end;
 end;
 
+procedure TClientTcpConnectionActor.Step;
+begin
+  Self.Receive(Self.MsgTable, FiftyMilliseconds);
+
+  Self.TryReceiveData(FiftyMilliseconds);
+end;
+
 //* TClientTcpConnectionActor Protected methods ********************************
 
 procedure TClientTcpConnectionActor.RegisterActions(Table: TActorMessageTable);
@@ -426,15 +433,6 @@ begin
   Table.Add(Self.FindConnect, Self.Connect);
   Table.Add(Self.FindClose, Self.Close);
   Table.Add(Self.FindSendData, Self.SendData);
-end;
-
-procedure TClientTcpConnectionActor.Run;
-begin
-  while not Self.Terminated do begin
-    Self.Receive(Self.MsgTable, FiftyMilliseconds);
-
-    Self.TryReceiveData(FiftyMilliseconds);
-  end;
 end;
 
 //* TClientTcpConnectionActor Private methods **********************************
