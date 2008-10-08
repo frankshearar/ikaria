@@ -129,7 +129,6 @@ type
     fPeerBinding:  TLocationTuple;
     fTimeout:      Cardinal;
 
-    function  FindClosed(Msg: TTuple): Boolean;
     function  FindOpened(Msg: TTuple): Boolean;
     procedure RaiseConnectTimeoutException;
     procedure ReactToOpened(Msg: TTuple);
@@ -588,11 +587,6 @@ begin
 end;
 
 //* TClientTcpConnectionActorInterface Private methods *************************
-
-function TClientTcpConnectionActorInterface.FindClosed(Msg: TTuple): Boolean;
-begin
-  Result := Self.MatchMessageName(Msg, ClosedConnectionMsg)
-end;
 
 function TClientTcpConnectionActorInterface.FindOpened(Msg: TTuple): Boolean;
 begin
