@@ -259,6 +259,8 @@ type
     constructor Create(E: TActorEnvironment);
     destructor  Destroy; override;
 
+    function  FindAny(Msg: TTuple): Boolean;
+
     procedure Link(PID: TProcessID);
     function  MatchMessageName(Msg: TTuple; MsgName: String): Boolean;
     procedure Receive(Matching: TMessageFinder;
@@ -292,8 +294,6 @@ type
     fResult: TTuple;
   public
     destructor Destroy; override;
-
-    function  AllMatcher(Msg: TTuple): Boolean;
     procedure NullAction(Msg: TTuple);
     procedure NullThunk;
     procedure Reset;
@@ -567,7 +567,7 @@ begin
       ReroutedMsg.Free;
     end;
 
-    Intf.Receive(Intf.AllMatcher, Intf.StoreFirstMessage, Timeout, Intf.NullThunk);
+    Intf.Receive(Intf.FindAny, Intf.StoreFirstMessage, Timeout, Intf.NullThunk);
 
     if (Intf.Result <> nil) then
       Result := Intf.Result.Copy as TTuple;
@@ -1307,6 +1307,11 @@ begin
   inherited Destroy;
 end;
 
+function TActorInterface.FindAny(Msg: TTuple): Boolean;
+begin
+  Result := true;
+end;
+
 procedure TActorInterface.Link(PID: TProcessID);
 begin
   Self.Mailbox.Link(PID);
@@ -1528,11 +1533,6 @@ begin
   Self.fResult.Free;
 
   inherited Destroy;
-end;
-
-function TActorInterfaceForRPC.AllMatcher(Msg: TTuple): Boolean;
-begin
-  Result := true;
 end;
 
 procedure TActorInterfaceForRPC.NullAction(Msg: TTuple);
