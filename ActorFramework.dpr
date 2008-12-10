@@ -13,10 +13,12 @@ uses
   Forms,
   GuiTestRunner,
   ClientTcpConnectionActor in 'src\ClientTcpConnectionActor.pas',
+  ConnectionForwarder in 'src\ConnectionForwarder.pas',
   Ikaria in 'src\Ikaria.pas',
   IkariaForWindows in 'src\IkariaForWindows.pas',
   PingPong in 'src\PingPong.pas' {PingPongDemo},
   TestClientTcpConnectionActor in 'test\TestClientTcpConnectionActor.pas',
+  TestConnectionForwarder in 'test\TestConnectionForwarder.pas',
   TestIkaria in 'test\TestIkaria.pas',
   TestIkariaForWindows in 'test\TestIkariaForWindows.pas';
 

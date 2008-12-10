@@ -16,44 +16,52 @@ uses
   TestFramework, Windows;
 
 type
+  TestFunctions = class(TTestCase)
+  published
+    procedure TestStreamToStrEmptyString;
+    procedure TestStreamToStr;
+  end;
+
   TestTClientTcpConnectionActor = class(TActorTestCase)
   private
     CloseConnection: TMessageTuple;
     Closed:          Boolean;
     Connected:       Boolean;
-    Connection:      TClientTcpConnectionActor;
     ConnectionCount: Integer;
     ConnectTo:       TOpenMsg;
     ConnEvent:       TEvent;
     DisconEvent:     TEvent;
     Disconnected:    Boolean;
-    Environment:     TActorEnvironment;
     Error:           String;
     LastClientPort:  Integer;
     Location:        TLocationTuple;
-    ReceivedData:    String;
-    RPC:             TActorInterface;
-    SendData:        TSendDataMsg;
-    SendEvent:       TEvent;
-    Server:          TIdTcpServer;
-    TestData:        String;
     TestTable:       TActorMessageTable;
-    TimedOut:        Boolean;
 
     procedure AckConnection(Thread: TIdPeerThread);
-    procedure CollectTestData(Thread: TIdPeerThread);
-    procedure Connect;
-    procedure Disconnect;
     function  FindClosed(Msg: TTuple): Boolean;
     function  FindConnected(Msg: TTuple): Boolean;
-    function  FindReceivedData(Msg: TTuple): Boolean;
     procedure MarkConnected(Msg: TTuple);
     procedure MarkClosed(Msg: TTuple);
     function  MatchMessageName(Msg: TTuple; Name: String): Boolean;
+  protected
+    Connection:   TClientTcpConnectionActor;
+    Environment:  TActorEnvironment;
+    ReceivedData: String;
+    RPC:          TActorInterface;
+    SendData:     TSendDataMsg;
+    SendEvent:    TEvent;
+    Server:       TIdTcpServer;
+    TestData:     String;
+    TimedOut:     Boolean;
+
+    procedure CollectTestData(Thread: TIdPeerThread);
+    procedure Connect;
+    procedure Disconnect;
+    function  FindReceivedData(Msg: TTuple): Boolean;
     procedure ServerSend(S: String);
+    function  SpawnConnection: TClientTcpConnectionActor; virtual;
     procedure StoreReceivedData(Msg: TTuple);
     procedure Timeout;
-    procedure WaitFor(E: TEvent; Timeout: Cardinal; Msg: String);
   public
     procedure SetUp; override;
     procedure TearDown; override;
@@ -63,7 +71,32 @@ type
     procedure TestConnect;
     procedure TestDoubleClose;
     procedure TestDoubleConnect;
-    procedure TestReceivedData;
+    procedure TestReceivedData; virtual;
+    procedure TestSendData; virtual;
+  end;
+
+  TestTClientTcpConnectionActorInterface = class(TTestCase)
+  private
+    Client:        TProcessID;
+    ClientAddress: String;
+    ClientPort:    Integer;
+    ConnectEvent:  TEvent;
+    DataEvent:     TEvent;
+    Iface:         TClientTcpConnectionActorInterface;
+    ReceivedData:  String;
+    Server:        TIdTcpServer;
+    TestData:      String;
+
+    procedure AckConnection(Peer: TIdPeerThread);
+    procedure RecordData(Peer: TIdPeerThread);
+    procedure CheckPortFree(Address: String; Port: Cardinal);
+    procedure WaitFor(E: TEvent; Timeout: Cardinal; Msg: String);
+  public
+    procedure SetUp; override;
+    procedure TearDown; override;
+  published
+    procedure TestConnect;
+    procedure TestConnectNoServer;
     procedure TestSendData;
   end;
 
@@ -74,12 +107,45 @@ const
 implementation
 
 uses
-  Classes, Forms, Messages, SysUtils, IdTCPConnection;
+  Classes, Forms, IdException, Messages, SysUtils, IdTCPConnection;
 
 function Suite: ITestSuite;
 begin
   Result := TTestSuite.Create('ClientTcpConnectionActor unit tests');
+  Result.AddSuite(TestFunctions.Suite);
   Result.AddSuite(TestTClientTcpConnectionActor.Suite);
+  Result.AddSuite(TestTClientTcpConnectionActorInterface.Suite);
+end;
+
+//******************************************************************************
+//* TestFunctions                                                              *
+//******************************************************************************
+//* TestFunctions Published methods ********************************************
+
+procedure TestFunctions.TestStreamToStrEmptyString;
+var
+  S: TStringStream;
+begin
+  S := TStringStream.Create('');
+  try
+    CheckEquals('', StreamToStr(S), 'Empty string');
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TestFunctions.TestStreamToStr;
+const
+  Data = 'foobar';
+var
+  S: TStringStream;
+begin
+  S := TStringStream.Create(Data);
+  try
+    CheckEquals(Data, StreamToStr(S), 'Non-empty string');
+  finally
+    S.Free;
+  end;
 end;
 
 //******************************************************************************
@@ -114,7 +180,7 @@ begin
   Self.CloseConnection := TMessageTuple.Create(CloseConnectionMsg, Self.RPC.PID);
   Self.SendData        := TSendDataMsg.Create(Self.RPC.PID, Self.TestData);
 
-  Self.Connection := TClientTcpConnectionActor.Create(Self.Environment, TActor.RootActor);
+  Self.Connection := Self.SpawnConnection;
 
   Self.Closed          := false;
   Self.Connected       := false;
@@ -141,19 +207,7 @@ begin
   inherited TearDown;
 end;
 
-//* TestTClientTcpConnectionActor Private methods ******************************
-
-procedure TestTClientTcpConnectionActor.AckConnection(Thread: TIdPeerThread);
-begin
-  // Here I thought this callback ran just once per connection, but it's running
-  // a metric kajillion times per connection. Thus, LastClientPort allows us to
-  // set ConnEvent ONCE per unique connection (almost).
-
-  if (Thread.Connection.Socket.Binding.PeerPort <> Self.LastClientPort) then begin
-    Self.LastClientPort := Thread.Connection.Socket.Binding.PeerPort;
-    Self.ConnEvent.SetEvent;
-  end;
-end;
+//* TestTClientTcpConnectionActor Protected methods ****************************
 
 procedure TestTClientTcpConnectionActor.CollectTestData(Thread: TIdPeerThread);
 var
@@ -179,7 +233,7 @@ end;
 
 procedure TestTClientTcpConnectionActor.Connect;
 begin
-  Self.Connection.Connect(Self.ConnectTo);
+  Self.Connection.Open(Self.ConnectTo);
   Self.WaitFor(Self.ConnEvent, OneSecond, 'Timed out waiting for server to accept connection');
   Self.RPC.Receive(Self.TestTable, OneSecond, Self.Timeout);
   Check(not Self.TimedOut, 'Timed out waiting to open connection');
@@ -198,6 +252,61 @@ begin
   Check(not Self.TimedOut, Format('Timeout waiting for %s message', [ClosedConnectionMsg]));
 end;
 
+function TestTClientTcpConnectionActor.FindReceivedData(Msg: TTuple): Boolean;
+begin
+  Result := Self.MatchMessageName(Msg, ReceivedDataMsg);
+end;
+
+procedure TestTClientTcpConnectionActor.ServerSend(S: String);
+var
+  I: Integer;
+  L: TList;
+begin
+  L := Self.Server.Threads.LockList;
+  try
+    for I := 0 to L.Count - 1 do
+      TIdPeerThread(L[I]).Connection.Write(S);
+  finally
+    Self.Server.Threads.UnlockList;
+  end;
+end;
+
+function TestTClientTcpConnectionActor.SpawnConnection: TClientTcpConnectionActor;
+begin
+  Result := TClientTcpConnectionActor.Create(Self.Environment, TActor.RootActor);
+end;
+
+procedure TestTClientTcpConnectionActor.StoreReceivedData(Msg: TTuple);
+var
+  O: TMessageTuple;
+begin
+  O := TMessageTuple.Overlay(Msg);
+  try
+    Self.ReceivedData := (O.Parameters[0] as TStringTerm).Value;
+  finally
+    O.Free;
+  end;
+end;
+
+procedure TestTClientTcpConnectionActor.Timeout;
+begin
+  Self.TimedOut := true;
+end;
+
+//* TestTClientTcpConnectionActor Private methods ******************************
+
+procedure TestTClientTcpConnectionActor.AckConnection(Thread: TIdPeerThread);
+begin
+  // Here I thought this callback ran just once per connection, but it's running
+  // a metric kajillion times per connection. Thus, LastClientPort allows us to
+  // set ConnEvent ONCE per unique connection (almost).
+
+  if (Thread.Connection.Socket.Binding.PeerPort <> Self.LastClientPort) then begin
+    Self.LastClientPort := Thread.Connection.Socket.Binding.PeerPort;
+    Self.ConnEvent.SetEvent;
+  end;
+end;
+
 function TestTClientTcpConnectionActor.FindClosed(Msg: TTuple): Boolean;
 begin
   Result := Self.MatchMessageName(Msg, ClosedConnectionMsg);
@@ -206,11 +315,6 @@ end;
 function TestTClientTcpConnectionActor.FindConnected(Msg: TTuple): Boolean;
 begin
   Result := Self.MatchMessageName(Msg, OpenedMsg);
-end;
-
-function TestTClientTcpConnectionActor.FindReceivedData(Msg: TTuple): Boolean;
-begin
-  Result := Self.MatchMessageName(Msg, ReceivedDataMsg);
 end;
 
 procedure TestTClientTcpConnectionActor.MarkClosed(Msg: TTuple);
@@ -248,43 +352,6 @@ begin
   except
     Result := false;
   end;
-end;
-
-procedure TestTClientTcpConnectionActor.ServerSend(S: String);
-var
-  I: Integer;
-  L: TList;
-begin
-  L := Self.Server.Threads.LockList;
-  try
-    for I := 0 to L.Count - 1 do
-      TIdPeerThread(L[I]).Connection.Write(S);
-  finally
-    Self.Server.Threads.UnlockList;
-  end;
-end;
-
-procedure TestTClientTcpConnectionActor.StoreReceivedData(Msg: TTuple);
-var
-  O: TMessageTuple;
-begin
-  O := TMessageTuple.Overlay(Msg);
-  try
-    Self.ReceivedData := (O.Parameters[0] as TStringTerm).Value;
-  finally
-    O.Free;
-  end;
-end;
-
-procedure TestTClientTcpConnectionActor.Timeout;
-begin
-  Self.TimedOut := true;
-end;
-
-procedure TestTClientTcpConnectionActor.WaitFor(E: TEvent; Timeout: Cardinal; Msg: String);
-begin
-  if (wrSignaled <> E.WaitFor(Timeout)) then
-    Fail(Msg);
 end;
 
 //* TestTClientTcpConnectionActor Published methods ****************************
@@ -330,7 +397,7 @@ begin
   Self.Connect;
 
   Self.ConnEvent.ResetEvent;
-  Self.Connection.Connect(Self.ConnectTo);
+  Self.Connection.Open(Self.ConnectTo);
   Self.WaitFor(Self.ConnEvent, OneSecond, 'Client didn''t reconnect');
 end;
 
@@ -358,6 +425,137 @@ begin
   Self.WaitFor(Self.SendEvent, OneSecond, 'Waiting for sent data to arrive');
 
   CheckEquals(Self.TestData, Self.ReceivedData, 'Data not sent');
+end;
+
+//******************************************************************************
+//* TestTClientTcpConnectionActorInterface                                     *
+//******************************************************************************
+//* TestTClientTcpConnectionActorInterface Public methods **********************
+
+procedure TestTClientTcpConnectionActorInterface.SetUp;
+begin
+  inherited SetUp;
+
+  Self.Client       := Spawn(TClientTcpConnectionActor);
+  Self.ConnectEvent := TSimpleEvent.Create;
+  Self.DataEvent    := TSimpleEvent.Create;
+  Self.Iface        := TClientTcpConnectionActorInterface.Create(DefaultEnv, Self.Client);
+  Self.Iface.Timeout := OneSecond;
+
+  Self.Server := TIdTCPServer.Create(nil);
+  Self.Server.OnExecute := Self.AckConnection;
+  Self.Server.Bindings.Add;
+  Self.Server.Bindings[0].IP   := '127.0.0.1';
+  Self.Server.Bindings[0].Port := 54321;
+
+  CheckPortFree(Self.Server.Bindings[0].IP, Self.Server.Bindings[0].Port);
+
+  Self.Server.Active := true;
+
+  Self.ReceivedData := '';
+  Self.TestData     := 'test';
+end;
+
+procedure TestTClientTcpConnectionActorInterface.TearDown;
+begin
+  Self.Server.Free;
+  Self.Iface.Terminate;
+  Self.Iface.Free;
+  Self.DataEvent.Free;
+  Self.ConnectEvent.Free;
+
+  inherited TearDown;
+end;
+
+//* TestTClientTcpConnectionActorInterface Private methods *********************
+
+procedure TestTClientTcpConnectionActorInterface.AckConnection(Peer: TIdPeerThread);
+begin
+  Self.ClientAddress := Peer.Connection.Socket.Binding.PeerIP;
+  Self.ClientPort    := Peer.Connection.Socket.Binding.PeerPort;
+
+  Self.ConnectEvent.SetEvent;
+end;
+
+procedure TestTClientTcpConnectionActorInterface.RecordData(Peer: TIdPeerThread);
+const
+  MoreThanTestDataLength = 1024;
+begin
+  Self.ReceivedData := Peer.Connection.ReadString(Length(Self.TestData));
+
+  Self.DataEvent.SetEvent;
+end;
+
+procedure TestTClientTcpConnectionActorInterface.CheckPortFree(Address: String; Port: Cardinal);
+var
+  S: TIdTcpServer;
+begin
+  S := TIdTCPServer.Create(nil);
+  try
+    S.Bindings.Add;
+    S.Bindings[0].IP   := Address;
+    S.Bindings[0].Port := Port;
+
+    try
+      S.Active := true;
+    except
+      on E: Exception do
+        Fail(Format('Test requires a used port: Could not bind to %s:%d (%s: %s)', [Address, Port, E.ClassName, E.Message]));
+    end;
+
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TestTClientTcpConnectionActorInterface.WaitFor(E: TEvent; Timeout: Cardinal; Msg: String);
+begin
+  if (wrSignaled <> E.WaitFor(Timeout)) then
+    Fail(Msg);
+end;
+
+//* TestTClientTcpConnectionActorInterface Published methods *******************
+
+procedure TestTClientTcpConnectionActorInterface.TestConnect;
+begin
+  Self.Iface.Connect(Self.Server.Bindings[0].IP, Self.Server.Bindings[0].Port);
+
+  CheckEquals(Self.ClientAddress, Self.Iface.LocalBinding.Address,   'LocalBinding Address');
+  CheckEquals(Self.ClientPort,    Self.Iface.LocalBinding.Port,      'LocalBinding Port');
+  CheckEquals(TcpTransport,       Self.Iface.LocalBinding.Transport, 'LocalBinding Transport');
+
+  CheckEquals(Self.Server.Bindings[0].IP,   Self.Iface.PeerBinding.Address,   'PeerBinding Address');
+  CheckEquals(Self.Server.Bindings[0].Port, Self.Iface.PeerBinding.Port,      'PeerBinding Port');
+  CheckEquals(TcpTransport,                 Self.Iface.PeerBinding.Transport, 'PeerBinding Transport');
+
+  Self.WaitFor(Self.ConnectEvent, OneSecond, 'Timed out waiting for a connection');
+end;
+
+procedure TestTClientTcpConnectionActorInterface.TestConnectNoServer;
+var
+  Address: String;
+  Port:    Cardinal;
+begin
+  Address := Self.Server.Bindings[0].IP;
+  Port    := Self.Server.Bindings[0].Port + 1;
+
+  CheckPortFree(Address, Port);
+
+  Self.ExpectedException := EIdConnectException;
+  Self.Iface.Connect(Address, Port);
+end;
+
+procedure TestTClientTcpConnectionActorInterface.TestSendData;
+begin
+  Self.Server.OnExecute := Self.RecordData;
+
+  Self.Iface.Connect(Self.Server.Bindings[0].IP, Self.Server.Bindings[0].Port);
+
+  Self.Iface.SendData(TestData);
+
+  Self.WaitFor(Self.DataEvent, OneSecond, 'Failed to receive data');
+
+  CheckEquals(Self.TestData, Self.ReceivedData, 'Data corrupted');
 end;
 
 initialization;

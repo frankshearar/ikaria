@@ -26,13 +26,21 @@ type
     NumProcs: TEdit;
     NumLoops: TEdit;
     RingBenchmark: TButton;
+    KillActor: TButton;
+    TrapExits: TButton;
     procedure StartPingClick(Sender: TObject);
     procedure StopPingClick(Sender: TObject);
     procedure NextFibClick(Sender: TObject);
     procedure RingBenchmarkClick(Sender: TObject);
+    procedure KillActorClick(Sender: TObject);
+    procedure TrapExitsClick(Sender: TObject);
   private
     NextFibber: TProcessID;
     Pinger:     TProcessID;
+
+    function  FindKilled(Msg: TTuple): Boolean;
+    procedure LogMessage(Msg: TTuple);
+    procedure LogTimeout;
   public
     constructor Create(AOwner: TComponent); override;
   end;
@@ -114,6 +122,41 @@ type
     procedure RegisterActions(Table: TActorMessageTable); override;
   end;
 
+  TLinkedActorA = class(TActor)
+  private
+    B: TProcessID;
+
+    procedure Log(M: TTuple);
+  protected
+    procedure RegisterActions(Table: TActorMessageTable); override;
+  public
+    procedure SetUp; override;
+    procedure Step; override;
+  end;
+
+  TLinkedActorB = class(TActor)
+  private
+    C: TProcessID;
+
+    procedure Log(M: TTuple);
+  protected
+    procedure RegisterActions(Table: TActorMessageTable); override;
+  public
+    procedure SetUp; override;
+  end;
+
+  TLinkedActorC = class(TActor)
+  private
+    function  FindDie(M: TTuple): Boolean;
+    function  FindDivide(M: TTuple): Boolean;
+    procedure Die(M: TTuple);
+    procedure Divide(M: TTuple);
+  protected
+    procedure RegisterActions(Table: TActorMessageTable); override;
+  public
+    procedure Step; override;
+  end;
+
 var
   PingPongDemo: TPingPongDemo;
 
@@ -125,6 +168,8 @@ uses
   SyncObjs, SysUtils;
 
 const
+  DieMsg     = 'die';
+  DivideMsg  = 'divide';
   LevelDebug = 0;
   LevelInfo  = 1;
   NextName   = 'next';
@@ -134,9 +179,24 @@ const
 var
   Lock: TCriticalSection;
 
+// Part of the TrapExits demo.
+var
+  MessageToC:         TMessageTuple;
+  ProcessBTrapsExits: Boolean;
+
 //******************************************************************************
 //* Unit private functions/procedures                                          *
 //******************************************************************************
+
+procedure GenericLog(S: String);
+begin
+  Lock.Acquire;
+  try
+    PingPongDemo.Log.Text := PingPongDemo.Log.Text + #13#10 + S;
+  finally
+    Lock.Release;
+  end;
+end;
 
 procedure LogToDemo(LogName: String;
                     Description: String;
@@ -146,13 +206,8 @@ procedure LogToDemo(LogName: String;
                     EventRef: Cardinal;
                     DebugInfo: String);
 begin
-  Lock.Acquire;
-  try
-    if (Severity > LevelDebug) then
-      PingPongDemo.Log.Text := PingPongDemo.Log.Text + #13#10 + Description;
-  finally
-    Lock.Release;
-  end;
+//  if (Severity > LevelDebug) then
+    GenericLog(Description);
 end;
 
 procedure NotifyOfActorCreation(ActorType, PID: String; Event: String);
@@ -170,6 +225,13 @@ begin
   LogToDemo('', Format(MessageSentMsg, [Sender, Target, Msg.AsString]), 0, 'Ikaria', LevelDebug, 0, '');
 end;
 
+// Part of the TrapExits demo.
+procedure Status(Name: String; Target: TProcessID);
+begin
+  if DefaultEnv.IsProcessAlive(Target) then
+    GenericLog(Format('%s (%s) is alive', [Name, Target]));
+end;
+
 //******************************************************************************
 //* TPingPongDemo                                                              *
 //******************************************************************************
@@ -182,6 +244,47 @@ begin
   Ikaria.OnActorCreatedHook := NotifyOfActorCreation;
   Ikaria.OnActorExitedHook  := NotifyOfActorExit;
   Ikaria.OnMessageSentHook  := NotifyOfMessageSend;
+end;
+
+//* TPingPongDemo Private methods **********************************************
+
+function TPingPongDemo.FindKilled(Msg: TTuple): Boolean;
+var
+  M: TMessageTuple;
+begin
+  try
+    M := TMessageTuple.Overlay(Msg);
+    try
+      Result := (M.MessageName = ExitMsg)
+            and (M.Parameters.Count > 0)
+            and (M.Parameters[0] is TStringTerm)
+            and (TStringTerm(M.Parameters[0]).Value = ExitReasonKilled);
+    finally
+      M.Free;
+    end;
+  except
+    Result := false;
+  end;
+end;
+
+procedure TPingPongDemo.LogMessage(Msg: TTuple);
+begin
+  Lock.Acquire;
+  try
+    Self.Log.Text := Self.Log.Text + #13#10 + Msg.AsString;
+  finally
+    Lock.Release;
+  end;
+end;
+
+procedure TPingPongDemo.LogTimeout;
+begin
+  Lock.Acquire;
+  try
+    Self.Log.Text := Self.Log.Text + #13#10 + 'Timeout waiting for message';
+  finally
+    Lock.Release;
+  end;
 end;
 
 //* TPingPongDemo Published methods ********************************************
@@ -207,7 +310,7 @@ begin
       Start := Now;
 
       Intf.Send(RB, 'setup', Params);
-      Intf.Receive(Intf.AllMatcher, Intf.StoreFirstMessage, 10*OneSecond);
+      Intf.Receive(Intf.FindAny, Intf.StoreFirstMessage, 10*OneSecond);
       if Assigned(Intf.Result) then begin
         Stop := Now;
         LogToDemo('', Format('Ring benchmark: Setup time: %s', [FormatDateTime('hh:mm:ss.zzz', Stop - Start)]), 0, '', LevelInfo, 0, '');
@@ -222,7 +325,7 @@ begin
 
     Intf.Reset;
     Intf.Send(RB, 'go');
-    Intf.Receive(Intf.AllMatcher, Intf.StoreFirstMessage, 10*OneSecond);
+    Intf.Receive(Intf.FindAny, Intf.StoreFirstMessage, 10*OneSecond);
     if Assigned(Intf.Result) then begin
       Stop := Now;
       LogToDemo('', Format('Ring benchmark: Run time: %s', [FormatDateTime('hh:mm:ss.zzz', Stop - Start)]), 0, '', LevelInfo, 0, '');
@@ -564,6 +667,151 @@ begin
   end;
 end;
 
+procedure TPingPongDemo.KillActorClick(Sender: TObject);
+var
+  K:      TTuple;
+  Intf:   TActorInterfaceForRPC;
+  Victim: TProcessID;
+begin
+  Intf := TActorInterfaceForRPC.Create(DefaultEnv);
+  try
+    K := DefaultEnv.CreateKillMsg;
+    try
+      Victim := Intf.SpawnLink(TActor);
+      Intf.Send(Victim, K);
+      Intf.Receive(Self.FindKilled, Self.LogMessage, OneSecond, Self.LogTimeout);
+    finally
+      K.Free;
+    end;
+  finally
+    Intf.Free;
+  end;
+end;
+
+procedure TPingPongDemo.TrapExitsClick(Sender: TObject);
+begin
+  // This demo attempts to translate the demo in Programming Erlang, in the
+  // Trapping Exit Signals (Advanced) section, pp. 157-158
+  ProcessBTrapsExits := false;
+  FreeAndNil(MessageToC);
+  MessageToC := TMessageTuple.Create(DieMsg, ExitReasonNormal);
+
+  Spawn(TLinkedActorA);
+end;
+
+//******************************************************************************
+//* TLinkedActorA                                                              *
+//******************************************************************************
+//* TLinkedActorA Public methods ***********************************************
+
+procedure TLinkedActorA.SetUp;
+begin
+  Self.TrapExits := true;
+
+  Self.B := Self.SpawnLink(TLinkedActorB);
+end;
+
+procedure TLinkedActorA.Step;
+begin
+
+  Sleep(1000);
+  Status('B', Self.B);
+end;
+
+//* TLinkedActorA Protected methods ********************************************
+
+procedure TLinkedActorA.RegisterActions(Table: TActorMessageTable);
+begin
+  Table.Add(Self.FindAny, Self.Log);
+end;
+
+//* TLinkedActorA Private methods **********************************************
+
+procedure TLinkedActorA.Log(M: TTuple);
+begin
+  GenericLog(Self.ClassName + ' received ' + M.AsString);
+end;
+
+//******************************************************************************
+//* TLinkedActorB                                                              *
+//******************************************************************************
+//* TLinkedActorB Public methods ***********************************************
+
+procedure TLinkedActorB.SetUp;
+begin
+  Self.TrapExits := ProcessBTrapsExits;
+
+  Self.C := Self.SpawnLink(TLinkedActorC)
+end;
+
+procedure TLinkedActorB.RegisterActions(Table: TActorMessageTable);
+begin
+  Table.Add(Self.FindAny, Self.Log);
+end;
+
+//* TLinkedActorB Private methods **********************************************
+
+procedure TLinkedActorB.Log(M: TTuple);
+begin
+  GenericLog(Self.ClassName + ' received ' + M.AsString);
+end;
+
+//******************************************************************************
+//* TLinkedActorC                                                              *
+//******************************************************************************
+//* TLinkedActorC Public methods ***********************************************
+
+procedure TLinkedActorC.Step;
+begin
+  if Self.FindDie(MessageToC) then
+    Self.Die(MessageToC)
+  else if Self.FindDivide(MessageToC) then
+    Self.Divide(MessageToC)
+  else
+    Self.Terminate;
+end;
+
+//* TLinkedActorC Protected methods ********************************************
+
+procedure TLinkedActorC.RegisterActions(Table: TActorMessageTable);
+begin
+  Table.Add(Self.FindDie, Self.Die);
+  Table.Add(Self.FindDivide, Self.Divide);
+end;
+
+//* TLinkedActorC Private methods **********************************************
+
+function TLinkedActorC.FindDie(M: TTuple): Boolean;
+begin
+  Result := Self.MatchMessageName(M, DieMsg);
+end;
+
+function TLinkedActorC.FindDivide(M: TTuple): Boolean;
+begin
+  Result := Self.MatchMessageName(M, DivideMsg);
+end;
+
+procedure TLinkedActorC.Die(M: TTuple);
+begin
+  Self.Terminate(M);
+end;
+
+procedure TLinkedActorC.Divide(M: TTuple);
+var
+  I: Integer;
+  Msg: TMessageTuple;
+begin
+  Msg := TMessageTuple.Overlay(M);
+  try
+    I := 1 div TIntegerTerm(Msg.Parameters[0]).Value;
+  finally
+    Msg.Free;
+  end;
+end;
+
 initialization
   Lock := TCriticalSection.Create;
+finalization
+  Lock.Free;
+  FreeAndNil(MessageToC);
 end.

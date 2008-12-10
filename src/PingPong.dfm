@@ -73,6 +73,24 @@ object PingPongDemo: TPingPongDemo
       TabOrder = 5
       OnClick = RingBenchmarkClick
     end
+    object KillActor: TButton
+      Left = 381
+      Top = 0
+      Width = 75
+      Height = 25
+      Caption = 'Kill Actor'
+      TabOrder = 6
+      OnClick = KillActorClick
+    end
+    object TrapExits: TButton
+      Left = 455
+      Top = 0
+      Width = 75
+      Height = 25
+      Caption = 'Trap Exits'
+      TabOrder = 7
+      OnClick = TrapExitsClick
+    end
   end
   object Log: TMemo
     Left = 0

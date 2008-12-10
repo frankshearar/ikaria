@@ -15,6 +15,9 @@ uses
   Classes, Contnrs, IdTcpClient, IdTcpConnection, Ikaria, Messages, SyncObjs,
   Windows;
 
+const
+  TcpTransport = 'TCP';
+
 type
   // In Erlang: {"127.0.0.1", 8080, "TCP"}
   // In LISP: '("127.0.0.1" 8080 "TCP")
@@ -82,55 +85,69 @@ type
     function MessageName: String; override;
   end;
 
-  // An Actor that sends the following messages:
+  // I wrap a TCP connection. I send the following messages:
   // * ("closed" {own-pid})
   // * ("closed" {own-pid} ("error reason"))
   // * ("opened" <own pid> (<local binding> <remote binding>))
   // * ("received-data {own-pid} ("data"))
-  // and receives the following messages:
+  // and receive/expect the following messages:
   // * ("close" {src-pid})
-  // * ("connect" {src-pid} ("address" port "transport))
+  // * ("open" {src-pid} ("address" port "transport))
   // * ("send-data" {src-pid} ("data"))
+  //
+  // The Controller is the Actor that sends this Actor an "open" message.
   TClientTcpConnectionActor = class(TActor)
   private
-    Connection: TIdTcpClient;
-    Controller: TProcessID;
-    Timeout:    Cardinal;
+    fController: TProcessID;
+    fConnection: TIdTcpClient;
+    Timeout:     Cardinal;
 
-    procedure CloseConnection(Connection: TIdTCPConnection; Controller: TProcessID);
     procedure Disconnected(Sender: TObject);
-    procedure ReportReceivedData(C: TIdTcpConnection);
     procedure SignalClosureTo(Target: TProcessID; Reason: String = '');
     procedure SignalDataTo(Target: TProcessID; Data: String);
     procedure SignalOpeningTo(Target: TProcessID);
     procedure TryReceiveData(Timeout: Cardinal);
   protected
+    procedure CloseConnection(Connection: TIdTCPConnection; Controller: TProcessID);
     procedure RegisterActions(Table: TActorMessageTable); override;
+    procedure ReportReceivedData(S: String); overload;
+    procedure ReportReceivedData(S: TStream); overload;
+    procedure WriteData(S: String); virtual;
+
+    property Connection: TIdTcpClient read fConnection;
+    property Controller: TProcessID   read fController;
   public
     constructor Create(E: TActorEnvironment; Parent: TProcessID); override;
     destructor  Destroy; override;
 
     procedure Close(Msg: TTuple);
-    procedure Connect(Msg: TTuple);
+    procedure Open(Msg: TTuple);
     function  Connected: Boolean;
     function  FindClose(Msg: TTuple): Boolean;
-    function  FindConnect(Msg: TTuple): Boolean;
+    function  FindOpen(Msg: TTuple): Boolean;
     function  FindSendData(Msg: TTuple): Boolean;
-    procedure ReceiveData(Timeout: Cardinal);
+    procedure ReceiveData(Timeout: Cardinal); virtual;
     procedure SendData(Msg: TTuple);
     procedure Step; override;
   end;
 
   // I provide a nice "normal" interface to a ClientTcpConnectionActor.
+  //
+  // I provide synchronous methods for connecting to a server, closing a
+  // connection, and terminating the client actor.
   TClientTcpConnectionActorInterface = class(TActorInterface)
   private
-    Client:        TProcessID;
-    fLocalBinding: TLocationTuple;
-    fPeerBinding:  TLocationTuple;
-    fTimeout:      Cardinal;
+    Client:             TProcessID;
+    fLocalBinding:      TLocationTuple;
+    fPeerBinding:       TLocationTuple;
+    fTimeout:           Cardinal;
+    TimedoutOnTerminate: Boolean;
 
+    function  FindExit(Msg: TTuple): Boolean;
     function  FindOpened(Msg: TTuple): Boolean;
     procedure RaiseConnectTimeoutException;
+    procedure RaiseExitTimeoutException;
+    procedure ReactToExit(Msg: TTuple);
     procedure ReactToOpened(Msg: TTuple);
     procedure Replace(var Field: TLocationTuple; NewValue: TLocationTuple);
   public
@@ -138,8 +155,9 @@ type
     destructor  Destroy; override;
 
     procedure Close;
-    procedure Connect(Address: String; Port: Cardinal; Transport: String = 'TCP');
+    procedure Connect(Address: String; Port: Cardinal; Transport: String = TcpTransport);
     procedure SendData(S: String);
+    function  Terminate: Boolean;
 
     property LocalBinding: TLocationTuple read fLocalBinding;
     property PeerBinding:  TLocationTuple read fPeerBinding;
@@ -157,10 +175,30 @@ const
 const
   FiftyMilliseconds = 50;
 
+function StreamToStr(S: TStream): String;
+
 implementation
 
 uses
   IdException, IdSocketHandle, SysUtils, TypInfo, WinSock;
+
+//******************************************************************************
+//* Unit Public functions & procedures                                         *
+//******************************************************************************
+
+function StreamToStr(S: TStream): String;
+var
+  SS: TStringStream;
+begin
+  SS := TStringStream.Create('');
+  try
+    SS.CopyFrom(S, 0);
+
+    Result := SS.DataString;
+  finally
+    SS.Free;
+  end;
+end;
 
 //******************************************************************************
 //* TLocationTuple                                                             *
@@ -336,15 +374,15 @@ constructor TClientTcpConnectionActor.Create(E: TActorEnvironment; Parent: TProc
 begin
   inherited Create(E, Parent);
 
-  Self.Connection := TIdTcpClient.Create(nil);
+  Self.fConnection := TIdTcpClient.Create(nil);
   Self.Timeout := 20*OneSecond;
 
-  Self.Connection.OnDisconnected := Self.Disconnected;
+  Self.fConnection.OnDisconnected := Self.Disconnected;
 end;
 
 destructor TClientTcpConnectionActor.Destroy;
 begin
-  Self.Connection.Free;
+  Self.fConnection.Free;
 
   inherited Destroy;
 end;
@@ -354,7 +392,7 @@ begin
   Self.CloseConnection(Self.Connection, Self.Controller);
 end;
 
-procedure TClientTcpConnectionActor.Connect(Msg: TTuple);
+procedure TClientTcpConnectionActor.Open(Msg: TTuple);
 var
   Conn: TOpenMsg;
 begin
@@ -363,7 +401,7 @@ begin
 
   Conn := TOpenMsg.Overlay(Msg);
   try
-    Self.Controller := Conn.ReplyTo;
+    Self.fController := Conn.ReplyTo;
 
     Self.Connection.Host := Conn.Location.Address;
     Self.Connection.Port := Conn.Location.Port;
@@ -385,7 +423,7 @@ begin
   Result := Self.MatchMessageName(Msg, CloseConnectionMsg);
 end;
 
-function TClientTcpConnectionActor.FindConnect(Msg: TTuple): Boolean;
+function TClientTcpConnectionActor.FindOpen(Msg: TTuple): Boolean;
 begin
   Result := Self.MatchMessageName(Msg, OpenMsg);
 end;
@@ -400,7 +438,7 @@ begin
   Self.Connection.ReadFromStack(true, Timeout, false);
 
   if (Self.Connection.InputBuffer.Size > 0) then begin
-    Self.ReportReceivedData(Self.Connection);
+    Self.ReportReceivedData(Self.Connection.InputBuffer);
     Self.Connection.InputBuffer.Remove(Self.Connection.InputBuffer.Size);
   end;
 end;
@@ -411,7 +449,7 @@ var
 begin
   O := TSendDataMsg.Overlay(Msg);
   try
-    Self.Connection.Write(O.Data);
+    Self.WriteData(O.Data);
   finally
     O.Free;
   end;
@@ -426,40 +464,41 @@ end;
 
 //* TClientTcpConnectionActor Protected methods ********************************
 
-procedure TClientTcpConnectionActor.RegisterActions(Table: TActorMessageTable);
-begin
-  inherited RegisterActions(Table);
-
-  Table.Add(Self.FindConnect, Self.Connect);
-  Table.Add(Self.FindClose, Self.Close);
-  Table.Add(Self.FindSendData, Self.SendData);
-end;
-
-//* TClientTcpConnectionActor Private methods **********************************
-
 procedure TClientTcpConnectionActor.CloseConnection(Connection: TIdTCPConnection; Controller: TProcessID);
 begin
   if Connection.Connected then
     Connection.Disconnect;
 end;
 
+procedure TClientTcpConnectionActor.RegisterActions(Table: TActorMessageTable);
+begin
+  inherited RegisterActions(Table);
+
+  Table.Add(Self.FindOpen, Self.Open);
+  Table.Add(Self.FindClose, Self.Close);
+  Table.Add(Self.FindSendData, Self.SendData);
+end;
+
+procedure TClientTcpConnectionActor.ReportReceivedData(S: String);
+begin
+  Self.SignalDataTo(Self.Controller, S);
+end;
+
+procedure TClientTcpConnectionActor.ReportReceivedData(S: TStream);
+begin
+  Self.ReportReceivedData(StreamToStr(S));
+end;
+
+procedure TClientTcpConnectionActor.WriteData(S: String);
+begin
+  Self.Connection.Write(S);
+end;
+
+//* TClientTcpConnectionActor Private methods **********************************
+
 procedure TClientTcpConnectionActor.Disconnected(Sender: TObject);
 begin
   Self.SignalClosureTo(Controller);
-end;
-
-procedure TClientTcpConnectionActor.ReportReceivedData(C: TIdTcpConnection);
-var
-  Result: TStringStream;
-begin
-  Result := TStringStream.Create('');
-  try
-    Result.CopyFrom(C.InputBuffer, 0);
-
-    Self.SignalDataTo(Self.Controller, Result.DataString);
-  finally
-    Result.Free;
-  end;
 end;
 
 procedure TClientTcpConnectionActor.SignalClosureTo(Target: TProcessID; Reason: String = '');
@@ -496,7 +535,7 @@ var
   Bindings: TOpenedMsg;
 begin
   B := Self.Connection.Socket.Binding;
-  Bindings := TOpenedMsg.Create(Self.PID, B.IP, B.Port, 'TCP', B.PeerIP, B.PeerPort, 'TCP');
+  Bindings := TOpenedMsg.Create(Self.PID, B.IP, B.Port, TcpTransport, B.PeerIP, B.PeerPort, TcpTransport);
   try
     Self.Send(Self.Controller, Bindings);
   finally
@@ -526,10 +565,13 @@ begin
   inherited Create(E);
 
   Self.Client := ClientPID;
+  Self.Link(Self.Client);
 
   Self.fLocalBinding := TLocationTuple.Create('', 0, '');
   Self.fPeerBinding  := Self.LocalBinding.Copy as TLocationTuple;
   Self.Timeout := 5*OneSecond;
+
+  Self.TimedoutOnTerminate := false;
 end;
 
 destructor TClientTcpConnectionActorInterface.Destroy;
@@ -547,7 +589,7 @@ begin
 //  Self.Receive(Self.FindClosed, Self.DoNothing, Self.Timeout, Self.RaiseConnectTimeoutException);
 end;
 
-procedure TClientTcpConnectionActorInterface.Connect(Address: String; Port: Cardinal; Transport: String = 'TCP');
+procedure TClientTcpConnectionActorInterface.Connect(Address: String; Port: Cardinal; Transport: String = TcpTransport);
 var
   M:    TOpenMsg;
   Peer: TLocationTuple;
@@ -584,7 +626,21 @@ begin
   end;
 end;
 
+function TClientTcpConnectionActorInterface.Terminate: Boolean;
+begin
+  Self.Environment.Exit(Self.Client);
+
+  Self.Receive(Self.FindExit, Self.ReactToExit, Self.Timeout, Self.RaiseExitTimeoutException);
+
+  Result := Self.TimedOutOnTerminate;
+end;
+
 //* TClientTcpConnectionActorInterface Private methods *************************
+
+function TClientTcpConnectionActorInterface.FindExit(Msg: TTuple): Boolean;
+begin
+  Result := Self.MatchMessageName(Msg, ExitMsg)
+end;
 
 function TClientTcpConnectionActorInterface.FindOpened(Msg: TTuple): Boolean;
 begin
@@ -598,6 +654,16 @@ begin
   B := Self.PeerBinding;
 
   raise EIdConnectException.Create(Format('Failed to connect to %s:%d/%s', [B.Address, B.Port, B.Transport]));
+end;
+
+procedure TClientTcpConnectionActorInterface.RaiseExitTimeoutException;
+begin
+  Self.TimedoutOnTerminate := true;
+end;
+
+procedure TClientTcpConnectionActorInterface.ReactToExit(Msg: TTuple);
+begin
+  // Client's exited. This tells us why.
 end;
 
 procedure TClientTcpConnectionActorInterface.ReactToOpened(Msg: TTuple);

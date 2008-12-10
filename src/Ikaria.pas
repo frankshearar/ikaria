@@ -242,8 +242,8 @@ type
   // messages from Actors.
   TActorInterface = class(TObject)
   private
-    Environment: TActorEnvironment;
     fTerminated: Boolean;
+    fTrapExits:  Boolean;
     Lock:        TCriticalSection;
     Mailbox:     TActorMailbox;
     MsgEvent:    TEvent;
@@ -254,6 +254,8 @@ type
     procedure NullThunk;
     function  WaitForMessage(Timeout: Cardinal): Boolean;
   protected
+    Environment: TActorEnvironment;
+
     procedure DoNothing(Msg: TTuple);
   public
     constructor Create(E: TActorEnvironment);
@@ -286,6 +288,7 @@ type
 
     property PID:        TProcessID read GetPID;
     property Terminated: Boolean    read fTerminated write fTerminated;
+    property TrapExits:  Boolean    read fTrapExits write fTrapExits;
   end;
 
   // I provide some convenience methods for the RPC function.
@@ -320,6 +323,8 @@ type
   // etc. - to my subclasses.
   TActor = class(TActorInterface)
   private
+    fKilled: Boolean;
+
     procedure ReactToExit(Msg: TTuple);
     procedure ReactToKill(Msg: TTuple);
     procedure RegisterRequiredActions(Table: TActorMessageTable);
@@ -341,10 +346,14 @@ type
     constructor Create(E: TActorEnvironment; Parent: TProcessID); virtual;
     destructor  Destroy; override;
 
+    procedure SendKilledExit;
     procedure SetUp; virtual;
     procedure Step; virtual;
     procedure TearDown; virtual;
-    procedure Terminate; reintroduce; virtual;
+    procedure Terminate; reintroduce; overload; virtual;
+    procedure Terminate(Reason: TTuple); reintroduce; overload; virtual;
+
+    property Killed: Boolean read fKilled;
   end;
 
   TThunkActor = class(TActor)
@@ -385,8 +394,10 @@ type
   protected
     function Whois(PID: TProcessID): TActorMailbox; virtual;
   public
+    function  CreateKillMsg: TTuple;
     procedure Exit(Target: TProcessID); overload;
     procedure Exit(Target: TProcessID; Reason: TTuple); overload; virtual;
+    function  IsProcessAlive(Target: TProcessID): Boolean;
     procedure Kill(Target: TProcessID);
     function  NextPID: TProcessID; virtual;
     function  NextTag: String; virtual;
@@ -398,6 +409,7 @@ type
     function  PrimitiveSpawn(T: TThunk): TProcessID; overload; virtual;
     function  PrimitiveSpawnLink(ActorType: TActorClass; Parent: TProcessID): TProcessID; virtual;
     procedure PrimitiveUnregisterActor(A: TActorMailbox); virtual;
+    procedure SetTrapExit(PID: TProcessID; TrapExits: Boolean); virtual;
   end;
 
   TThreadedActorEnvironment = class(TActorEnvironment)
@@ -413,12 +425,12 @@ type
 
     procedure ActivateActor(A: TActor);
     procedure Deactivate(L: TStringList);
-    procedure Lock;
     procedure RemoveRunner(TerminatedThread: TObject);
-    procedure Unlock;
     procedure WaitForAllActorsExit(L: TStringList);
   protected
-    function Whois(PID: TProcessID): TActorMailbox; override;
+    procedure Lock;
+    procedure Unlock;
+    function  Whois(PID: TProcessID): TActorMailbox; override;
   public
     constructor Create;
     destructor  Destroy; override;
@@ -433,6 +445,18 @@ type
     function  PrimitiveSpawn(T: TThunk): TProcessID; override;
     function  PrimitiveSpawnLink(ActorType: TActorClass; Parent: TProcessID): TProcessID; override;
     procedure PrimitiveUnregisterActor(A: TActorMailbox); override;
+    procedure SetTrapExit(PID: TProcessID; TrapExits: Boolean); override;
+  end;
+
+  TDebugActorEnvironment = class(TThreadedActorEnvironment)
+  private
+    fSentMessages: TStrings;
+  public
+    constructor Create;
+    destructor  Destroy; override;
+
+    procedure PrimitiveSend(Sender, Target: TProcessID; Msg: TTuple); override;
+    procedure SnapshotSentMessages(Buffer: TStrings);
   end;
 
   EActorException = class(Exception);
@@ -470,6 +494,7 @@ const
   ExitReasonException = '%s: %s';
   ExitReasonNormal    = 'normal';
   ExitReasonKill      = 'kill';
+  ExitReasonKilled    = 'killed';
 
 // String conversion
 const
@@ -1576,6 +1601,7 @@ constructor TActor.Create(E: TActorEnvironment; Parent: TProcessID);
 begin
   inherited Create(E);
 
+  Self.fKilled  := false;
   Self.ParentID := Parent;
 
   Self.MsgTable := TActorMessageTable.Create;
@@ -1592,9 +1618,22 @@ begin
   inherited Destroy;
 end;
 
+procedure TActor.SendKilledExit;
+var
+  K: TTuple;
+begin
+  K := TTuple.Create;
+  try
+    K.AddString(ExitReasonKilled);
+    Self.SendExit(K);
+  finally
+    K.Free;
+  end;
+end;
+
 procedure TActor.SetUp;
 begin
-  // Put any initial message-sending stuff here. 
+  // Put any initial message-sending stuff here.
 end;
 
 procedure TActor.Step;
@@ -1613,6 +1652,15 @@ end;
 procedure TActor.Terminate;
 begin
   Self.Terminated := true;
+
+  Self.SendNormalExit;
+end;
+
+procedure TActor.Terminate(Reason: TTuple);
+begin
+  Self.Terminated := true;
+
+  Self.SendExit(Reason);
 end;
 
 //* TActor Protected methods ***************************************************
@@ -1685,6 +1733,7 @@ end;
 
 procedure TActor.ReactToKill(Msg: TTuple);
 begin
+  Self.fKilled := true;
   Self.Terminate;
 end;
 
@@ -1759,7 +1808,11 @@ begin
       finally
         Self.Actor.TearDown;
       end;
-      Self.Actor.SendNormalExit;
+
+      if Self.Actor.Killed then
+        Self.Actor.SendKilledExit
+      else
+        Self.Actor.SendNormalExit;
     except
       on E: Exception do
         Self.Actor.SendExceptionalExit(E);
@@ -1774,6 +1827,13 @@ end;
 //* TActorEnvironment                                                          *
 //******************************************************************************
 //* TActorEnvironment Public methods *******************************************
+
+function TActorEnvironment.CreateKillMsg: TTuple;
+begin
+  Result := TTuple.Create;
+  Result.AddString(ExitMsg);
+  Result.AddString(ExitReasonKill);
+end;
 
 procedure TActorEnvironment.Exit(Target: TProcessID);
 var
@@ -1799,14 +1859,17 @@ begin
   end;
 end;
 
+function TActorEnvironment.IsProcessAlive(Target: TProcessID): Boolean;
+begin
+  Result := Assigned(Self.Whois(Target));
+end;
+
 procedure TActorEnvironment.Kill(Target: TProcessID);
 var
   Kill: TTuple;
 begin
-  Kill := TTuple.Create;
+  Kill := Self.CreateKillMsg;
   try
-    Kill.AddString(ExitReasonKill);
-
     ExitActor(Target, Kill);
   finally
     Kill.Free;
@@ -1875,6 +1938,11 @@ end;
 procedure TActorEnvironment.PrimitiveUnregisterActor(A: TActorMailbox);
 begin
   RaiseAbstractError(Self.ClassName, 'PrimitiveUnregisterActor');
+end;
+
+procedure TActorEnvironment.SetTrapExit(PID: TProcessID; TrapExits: Boolean);
+begin
+  RaiseAbstractError(Self.ClassName, 'SetTrapExit');
 end;
 
 //* TActorEnvironment Protected methods ****************************************
@@ -2085,7 +2153,26 @@ begin
   end;
 end;
 
+procedure TThreadedActorEnvironment.SetTrapExit(PID: TProcessID; TrapExits: Boolean);
+begin
+  Self.Lock;
+  try
+  finally
+    Self.Unlock;
+  end;
+end;
+
 //* TThreadedActorEnvironment Protected methods ********************************
+
+procedure TThreadedActorEnvironment.Lock;
+begin
+  Self.ActorLock.Acquire;
+end;
+
+procedure TThreadedActorEnvironment.Unlock;
+begin
+  Self.ActorLock.Release;
+end;
 
 function TThreadedActorEnvironment.Whois(PID: TProcessID): TActorMailbox;
 var
@@ -2134,11 +2221,6 @@ begin
   end;
 end;
 
-procedure TThreadedActorEnvironment.Lock;
-begin
-  Self.ActorLock.Acquire;
-end;
-
 procedure TThreadedActorEnvironment.RemoveRunner(TerminatedThread: TObject);
 begin
   Self.Lock;
@@ -2149,13 +2231,9 @@ begin
   end;
 end;
 
-procedure TThreadedActorEnvironment.Unlock;
-begin
-  Self.ActorLock.Release;
-end;
-
 procedure TThreadedActorEnvironment.WaitForAllActorsExit(L: TStringList);
 begin
+  // Poll every 500 milliseconds to see whether all actors have terminated.
   while true do begin
     Self.Lock;
     try
@@ -2164,6 +2242,44 @@ begin
       Self.Unlock;
     end;
     Sleep(OneSecond div 2);
+  end;
+end;
+
+//******************************************************************************
+//* TDebugActorEnvironment                                                     *
+//******************************************************************************
+//* TDebugActorEnvironment Public methods **************************************
+
+constructor TDebugActorEnvironment.Create;
+begin
+  inherited Create;
+
+  Self.fSentMessages := TStringList.Create;
+end;
+
+destructor TDebugActorEnvironment.Destroy;
+begin
+  Self.fSentMessages.Free;
+
+  inherited Destroy;
+end;
+
+procedure TDebugActorEnvironment.PrimitiveSend(Sender, Target: TProcessID; Msg: TTuple);
+begin
+  Self.fSentMessages.Add(Format('%s -> %s: %s', [Sender, Target, Msg.AsString]));
+
+  inherited PrimitiveSend(Sender, Target, Msg);
+end;
+
+procedure TDebugActorEnvironment.SnapshotSentMessages(Buffer: TStrings);
+begin
+  Buffer.Clear;
+
+  Self.Lock;
+  try
+    Buffer.AddStrings(Self.fSentMessages);
+  finally
+    Self.Unlock;
   end;
 end;
 
