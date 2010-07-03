@@ -435,7 +435,7 @@ end;
 
 procedure TClientTcpConnectionActor.ReceiveData(Timeout: Cardinal);
 begin
-  Self.Connection.ReadFromStack(true, Timeout, false);
+  Self.Connection.ReadFromStack(false, Timeout, false);
 
   if (Self.Connection.InputBuffer.Size > 0) then begin
     Self.ReportReceivedData(Self.Connection.InputBuffer);
@@ -545,14 +545,8 @@ end;
 
 procedure TClientTcpConnectionActor.TryReceiveData(Timeout: Cardinal);
 begin
-  if Self.Connection.Connected then begin
-    try
-      Self.ReceiveData(FiftyMilliseconds);
-    except
-      on EIdConnClosedGracefully do
-        Self.SignalClosureTo(Self.Controller);
-    end;
-  end;
+  if Self.Connected then
+    Self.ReceiveData(FiftyMilliseconds);
 end;
 
 //******************************************************************************

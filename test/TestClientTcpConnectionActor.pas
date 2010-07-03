@@ -215,12 +215,17 @@ begin
 
   S := TStringStream.Create('');
   try
-    while (Self.ReceivedData = '') do begin
-      Thread.Connection.ReadFromStack(true, OneSecond, false);
-      S.CopyFrom(Thread.Connection.InputBuffer, 0);
-      Thread.Connection.InputBuffer.Remove(Thread.Connection.InputBuffer.Size);
+    try
+      while (Self.ReceivedData = '') do begin
+        Thread.Connection.ReadFromStack(true, OneSecond, false);
 
-      Self.ReceivedData := Self.ReceivedData + S.DataString;
+        S.CopyFrom(Thread.Connection.InputBuffer, 0);
+        Thread.Connection.InputBuffer.Remove(Thread.Connection.InputBuffer.Size);
+
+        Self.ReceivedData := Self.ReceivedData + S.DataString;
+      end;
+    except
+      on EIdConnClosedGracefully do;
     end;
   finally
     S.Free;
@@ -262,8 +267,13 @@ var
 begin
   L := Self.Server.Threads.LockList;
   try
-    for I := 0 to L.Count - 1 do
-      TIdPeerThread(L[I]).Connection.Write(S);
+    for I := 0 to L.Count - 1 do begin
+      try
+        TIdPeerThread(L[I]).Connection.Write(S);
+      except
+        on EIdConnClosedGracefully do;
+      end;
+    end;
   finally
     Self.Server.Threads.UnlockList;
   end;
@@ -298,6 +308,8 @@ begin
   // Here I thought this callback ran just once per connection, but it's running
   // a metric kajillion times per connection. Thus, LastClientPort allows us to
   // set ConnEvent ONCE per unique connection (almost).
+
+  if not Thread.Connection.Connected then Exit;
 
   if (Thread.Connection.Socket.Binding.PeerPort <> Self.LastClientPort) then begin
     Self.LastClientPort := Thread.Connection.Socket.Binding.PeerPort;
