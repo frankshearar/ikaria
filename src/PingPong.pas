@@ -55,7 +55,7 @@ type
   protected
     procedure RegisterActions(Table: TActorMessageTable); override;
   public
-    procedure Setup; override;
+    procedure SetUp; override;
     procedure Step; override;
   end;
 
@@ -376,7 +376,7 @@ end;
 //******************************************************************************
 //* TPingActor Public methods **************************************************
 
-procedure TPingActor.Setup;
+procedure TPingActor.SetUp;
 begin
   Self.Ponger := Self.SpawnLink(TPongActor);
 end;
@@ -798,11 +798,15 @@ end;
 
 procedure TLinkedActorC.Divide(M: TTuple);
 var
-  I: Integer;
   Msg: TMessageTuple;
+  I:   Integer;
 begin
   Msg := TMessageTuple.Overlay(M);
   try
+    // "Blow up if the parameter's zero."
+
+    // Even though we don't use I it is illegal to just have an expression,
+    // except for Delphi 2006 and newer.
     I := 1 div TIntegerTerm(Msg.Parameters[0]).Value;
   finally
     Msg.Free;
