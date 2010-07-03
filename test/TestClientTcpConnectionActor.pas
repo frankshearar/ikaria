@@ -45,7 +45,6 @@ type
     function  MatchMessageName(Msg: TTuple; Name: String): Boolean;
   protected
     Connection:   TClientTcpConnectionActor;
-    Environment:  TActorEnvironment;
     ReceivedData: String;
     RPC:          TActorInterface;
     SendData:     TSendDataMsg;
@@ -159,7 +158,6 @@ begin
 
   Self.ConnEvent   := TSimpleEvent.Create;
   Self.DisconEvent := TSimpleEvent.Create;
-  Self.Environment := TThreadedActorEnvironment.Create;
   Self.SendEvent   := TSimpleEvent.Create;
   Self.TestData    := 'test data';
 

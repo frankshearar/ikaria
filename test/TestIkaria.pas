@@ -222,7 +222,6 @@ type
   TActorTestCase = class(TTestCase)
   private
     ActorExited: Boolean;
-    Environment: TActorEnvironment;
     ExitEvent:   TEvent;
     LastSentMsg: TActorMessage;
     MsgEvent:    TEvent;
@@ -230,6 +229,7 @@ type
     procedure NotifyOfExit(PID: String; Reason: TTuple);
     procedure StoreLastSentMessage(Sender, Target: TProcessID; Msg: TActorMessage);
   protected
+    Environment: TActorEnvironment;
 
     procedure CheckLastMsgEquals(Expected: TTuple; Msg: String);
     function  CopyLastSentMsg: TActorMessage;
@@ -1562,6 +1562,7 @@ begin
 
   Self.MsgEvent.Free;
   Self.ExitEvent.Free;
+  Self.Environment.Free;
 
   inherited TearDown;
 end;
