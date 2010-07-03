@@ -243,11 +243,11 @@ type
 
   TestTActor = class(TActorTestCase)
   private
-    E:         TEvent;
-    ExitRecvd: Boolean;
-    Reason:    String;
-    TestMsg:   TTuple;
-    TimedOut:  Boolean;
+    E:          TEvent;
+    ExitRecvd:  Boolean;
+    ExitReason: String;
+    TestMsg:    TTuple;
+    TimedOut:   Boolean;
 
     function  MatchExit(Msg: TTuple): Boolean;
     procedure RecordExit(Msg: TTuple);
@@ -286,7 +286,7 @@ const
 implementation
 
 uses
-  Contnrs;
+  Classes, Contnrs;
 
 type
   TEchoActor = class(TActor)
@@ -336,6 +336,45 @@ begin
   end;
 end;
 
+function CreateLogFile(Lock: TCriticalSection; Log: TObjectList): TStrings;
+var
+  I: Integer;
+begin
+  Lock.Acquire;
+  try
+     Result := TStringList.Create;
+
+     for I := 0 to Log.Count - 1 do begin
+       Result.Add(TLogEntry(Log[I]).Description);
+     end;
+  finally
+    Lock.Release;
+  end;
+end;
+
+procedure SaveLog(Lock: TCriticalSection; Log: TObjectList);
+var
+  Filename: String;
+  S: TStrings;
+begin
+  Lock.Acquire;
+  try
+    if (Log.Count > 0) then
+      Filename := TLogEntry(Log[0]).LogName + '.txt'
+    else
+      Filename := 'debug.txt';
+
+    S := CreateLogFile(Lock, Log);
+    try
+      S.SaveToFile(Filename);
+    finally
+      S.Free;
+    end;
+  finally
+    Lock.Release;
+  end;
+end;
+
 procedure PurgeLog;
 begin
   Lock.Acquire;
@@ -346,14 +385,14 @@ begin
   end;
 end;
 
-procedure NotifyOfActorCreation(ActorType, PID: String);
+procedure NotifyOfActorCreation(ActorType, PID, UnusedEvent: String);
 begin
-  LogEntry('', Format(ActorCreatedMsg, [PID, ActorType]), 0, 'Ikaria', 0, 0, '');
+  LogEntry('debug', Format(ActorCreatedMsg, [PID, ActorType]), 0, 'Ikaria', 0, 0, '');
 end;
 
 procedure NotifyOfActorExit(PID: String; ExitReason: TTuple);
 begin
-  LogEntry('', Format(ActorExitedMsg, [PID, ExitReason.AsString]), 0, 'Ikaria', 0, 0, '');
+  LogEntry('debug', Format(ActorExitedMsg, [PID, ExitReason.AsString]), 0, 'Ikaria', 0, 0, '');
 
   TestLock.Acquire;
   try
@@ -368,7 +407,7 @@ procedure StoreLastSentMessageInTestCase(Sender, Target: TProcessID; Msg: TActor
 begin
   TestLock.Acquire;
   try
-    LogEntry('', Format(MessageSentMsg, [Sender, Target, Msg.AsString]), 0, 'Ikaria', 0, 0, '');
+    LogEntry('debug', Format(MessageSentMsg, [Sender, Target, Msg.AsString]), 0, 'Ikaria', 0, 0, '');
     if Assigned(RunningTestCase) then
       RunningTestCase.StoreLastSentMessage(Sender, Target, Msg);
   finally
@@ -1535,8 +1574,9 @@ begin
   Self.ExitEvent   := TSimpleEvent.Create;
   Self.MsgEvent    := TSimpleEvent.Create;
 
-  OnActorExitedHook := NotifyOfActorExit;
-  OnMessageSentHook := StoreLastSentMessageInTestCase;
+  OnActorCreatedHook := NotifyOfActorCreation;
+  OnActorExitedHook  := NotifyOfActorExit;
+  OnMessageSentHook  := StoreLastSentMessageInTestCase;
 
 
   TestLock.Acquire;
@@ -1644,9 +1684,9 @@ begin
 
   Self.TestMsg := TMessageTuple.Create(TestName, '');
 
-  Self.ExitRecvd := false;
-  Self.Reason    := '';
-  Self.TimedOut  := false;
+  Self.ExitRecvd  := false;
+  Self.ExitReason := '';
+  Self.TimedOut   := false;
 end;
 
 procedure TestTActor.TearDown;
@@ -1682,7 +1722,7 @@ begin
   O := TMessageTuple.Overlay(Msg);
   try
     Self.ExitRecvd := true;
-    Self.Reason    := (O.Parameters[0] as TStringTerm).Value;
+    Self.ExitReason    := (O.Parameters[0] as TStringTerm).Value;
   finally
     O.Free;
   end;
@@ -1729,14 +1769,18 @@ procedure TestTActor.TestActorNotifiesLinkSetOfAbnormalExit;
 var
   I: TActorInterface;
 begin
-  I := TActorInterface.Create(Self.Environment);
   try
-    I.SpawnLink(TErrorActor);
+    I := TActorInterface.Create(Self.Environment);
+    try
+      I.SpawnLink(TErrorActor);
 
-    I.Receive(Self.MatchExit, Self.RecordExit, OneSecond, Self.Timeout);
-    Check(not Self.TimedOut, 'Timed out waiting for message');
-    Check(Self.ExitRecvd, Format('No %s message received', [ExitMsg]));
-    CheckEquals(TErrorActor.ExpectedReason, Self.Reason, 'Unexpected reason for exit');
+      I.Receive(Self.MatchExit, Self.RecordExit, OneSecond, Self.Timeout);
+      Check(not Self.TimedOut, 'Timed out waiting for message');
+      Check(Self.ExitRecvd, Format('No %s message received', [ExitMsg]));
+      CheckEquals(TErrorActor.ExpectedReason, Self.ExitReason, 'Unexpected reason for exit');
+    finally
+      I.Free;
+    end;
   finally
     I.Free;
   end;
@@ -1753,7 +1797,7 @@ begin
     I.Receive(Self.MatchExit, Self.RecordExit, OneSecond, Self.Timeout);
     Check(not Self.TimedOut, 'Timed out waiting for message');
     Check(Self.ExitRecvd, Format('No %s message received', [ExitMsg]));
-    CheckEquals(ExitReasonNormal, Self.Reason, 'Unexpected reason for exit');
+    CheckEquals(ExitReasonNormal, Self.ExitReason, 'Unexpected reason for exit');
   finally
     I.Free;
   end;
