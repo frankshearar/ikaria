@@ -1518,14 +1518,11 @@ function TActorInterface.WaitForMessage(Timeout: Cardinal): Boolean;
   begin
     raise ETimeout.Create(Format(ErrorMsg, [Reason]));
   end;
-var
-  ErrorMsg: String;
 begin
   // Return true if we received a message, false otherwise.
   // If something goes badly wrong, raise an exception.
 
   Result := false;
-  ErrorMsg := 'Unexpected result waiting for response: %s';
 
   case Self.MsgEvent.WaitFor(Timeout) of
     wrSignaled:  begin
