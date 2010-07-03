@@ -1769,18 +1769,14 @@ procedure TestTActor.TestActorNotifiesLinkSetOfAbnormalExit;
 var
   I: TActorInterface;
 begin
+  I := TActorInterface.Create(Self.Environment);
   try
-    I := TActorInterface.Create(Self.Environment);
-    try
-      I.SpawnLink(TErrorActor);
+    I.SpawnLink(TErrorActor);
 
-      I.Receive(Self.MatchExit, Self.RecordExit, OneSecond, Self.Timeout);
-      Check(not Self.TimedOut, 'Timed out waiting for message');
-      Check(Self.ExitRecvd, Format('No %s message received', [ExitMsg]));
-      CheckEquals(TErrorActor.ExpectedReason, Self.ExitReason, 'Unexpected reason for exit');
-    finally
-      I.Free;
-    end;
+    I.Receive(Self.MatchExit, Self.RecordExit, OneSecond, Self.Timeout);
+    Check(not Self.TimedOut, 'Timed out waiting for message');
+    Check(Self.ExitRecvd, Format('No %s message received', [ExitMsg]));
+    CheckEquals(TErrorActor.ExpectedReason, Self.ExitReason, 'Unexpected reason for exit');
   finally
     I.Free;
   end;
