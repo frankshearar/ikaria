@@ -12,7 +12,7 @@ type
   // responsible for freeing the embedded TTuple.
   //
   // You pass me a target handle with the message
-  // ("message-queue-handle {your-pid} (HWND)) and I pass on all other messages
+  // ("message-queue-handle" {your-pid} (HWND)) and I pass on all other messages
   // to that handle.
   TWindowsMessageForwarder = class(TActor)
   private
