@@ -9,6 +9,29 @@
 }
 unit Ikaria;
 
+{ Ikaria is an attempt at implementing an Actor model in Delphi.
+  Actors may
+  * compute something
+  * create other Actors
+  * send messages (in the form of tuples) to other Actors
+  * react to received messages.
+
+  You implement Actors by subclassing TActor. Then, for each interesting
+  message, you implement a finder method and a reactor method. The former takes
+  a tuple and returns a Boolean indicating a match, and the latter takes a tuple
+  and does something with it. Every Actor by default Steps through its
+  computation, usually waiting to receive an interesting message.
+
+  Note that you, as implementor of an Actor, need to exercise caution. You can
+  easily write a malicious Actor that sits in a tight loop, starving the
+  processor. The framework doesn't protect you from rabbit-bombing yourself.
+
+  Currently, the framework runs each Actor in its own, transient, thread.
+
+  (Why "Ikaria"? It's the town of one Thespis, regarded as being the very first
+  actor. "Delphi" is the name of an ancient Greek town, so it amused me to name
+  this framework after another Greek town.)
+}
 
 // TODO:
 // * Trapping of exits (when a flag is set)
@@ -370,7 +393,7 @@ type
 
   // Given an instantiated Actor, I run the Actor in a separate thread. When I
   // terminate (or rather, when the Actor signals its completion by returning
-  // from its Execute method), I destroy the Actor.
+  // from its Execute method), I signal my termination through OnExit.
   TActorRunner = class(TThread)
   private
     Actor:   TActor;
@@ -412,10 +435,16 @@ type
     procedure SetTrapExit(PID: TProcessID; TrapExits: Boolean); virtual;
   end;
 
+  // I run Actors in separate threads (TActorRunners). I manage the memory
+  // allocated to Actors created through PrimitiveSpawn/PrimitiveSpawnLink - I
+  // free these Actors when they terminate. You may attach Actors to me
+  // manually - by TActor.Create() or TActorInterface.Create() - but then YOU
+  // must free the Actors. (If you don't, I will hang forever, futilely waiting
+  // for all registered Actors to free.)
   TThreadedActorEnvironment = class(TActorEnvironment)
   private
     Actors:    TStringList;
-    ActorLock: TCriticalSection; // Used to lock access to Actors.
+    ActorLock: TCriticalSection; // Lock access to Actors.
     Runners:   TObjectList;
     UsedPIDs:  TStringList;
 
@@ -601,6 +630,12 @@ begin
       ReroutedMsg.Free;
     end;
 
+    // Approximate Erlang version:
+    // receive
+    //   X -> X
+    // after Timeout
+    //   nil
+    // end.
     Intf.Receive(Intf.FindAny, Intf.StoreFirstMessage, Timeout, Intf.NullThunk);
 
     if (Intf.Result <> nil) then
@@ -1570,10 +1605,12 @@ end;
 
 procedure TActorInterfaceForRPC.NullAction(Msg: TTuple);
 begin
+  // Do nothing.
 end;
 
 procedure TActorInterfaceForRPC.NullThunk;
 begin
+  // Do nothing.
 end;
 
 procedure TActorInterfaceForRPC.Reset;
