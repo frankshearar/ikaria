@@ -1867,7 +1867,7 @@ var
 begin
   Kill := Self.CreateKillMsg;
   try
-    ExitActor(Target, Kill);
+    Self.Exit(Target, Kill);
   finally
     Kill.Free;
   end;
