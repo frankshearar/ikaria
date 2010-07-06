@@ -486,6 +486,7 @@ function Spawn(T: TThunk): TProcessID; overload;
 const
   ActorCreatedMsg = 'Actor %s created (of type %s)';
   ActorExitedMsg  = 'Actor %s exited with reason %s';
+  ActorLinkedMsg  = 'Actor %s linked to actor %s';
   ActorFreedMsg   = 'Actor %s freed';
   MessageSentMsg  = 'Actor %s sent message to actor %s: %s';
 
@@ -503,6 +504,7 @@ const
 // Introspection callbacks
 type
   TActorEventProc  = procedure(ActorType, PID, Event: String);
+  TActorLinkedProc = procedure(LinkingPID, LinkedPID: String);
   TActorMsgProc    = procedure(PID: String; Data: TTuple);
   TMessageSendProc = procedure(Sender, Target: TProcessID; Msg: TActorMessage);
 
@@ -517,6 +519,7 @@ const
 var
   DefaultEnv:         TActorEnvironment;
   OnActorCreatedHook: TActorEventProc;
+  OnActorLinkedHook:  TActorLinkedProc;
   OnActorExitedHook:  TActorMsgProc;
   OnMessageSentHook:  TMessageSendProc;
 
@@ -546,6 +549,12 @@ procedure NotifyOfActorExit(PID: String; ExitReason: TTuple);
 begin
   if Assigned(OnActorExitedHook) then
     OnActorExitedHook(PID, ExitReason);
+end;
+
+procedure NotifyOfMessageLink(LinkingPID, LinkedPID: String);
+begin
+  if Assigned(OnActorLinkedHook) then
+    OnActorLinkedHook(LinkingPID, LinkedPID);
 end;
 
 procedure NotifyOfMessageSend(Sender, Target: TProcessID; Msg: TActorMessage);
@@ -2027,6 +2036,7 @@ begin
     if Assigned(A) and Assigned(B) then begin
       A.LinkSet.Add(B.PID);
       B.LinkSet.Add(A.PID);
+      NotifyOfMessageLink(LinkingPID, LinkedPID);
     end;
   finally
     Self.Unlock;

@@ -222,11 +222,14 @@ type
   TActorTestCase = class(TTestCase)
   private
     ActorExited: Boolean;
+    ActorLinked: Boolean;
     ExitEvent:   TEvent;
     LastSentMsg: TActorMessage;
+    LinkEvent:   TEvent;
     MsgEvent:    TEvent;
 
     procedure NotifyOfExit(PID: String; Reason: TTuple);
+    procedure NotifyOfLink(LinkingPID, LinkedPID: String);
     procedure StoreLastSentMessage(Sender, Target: TProcessID; Msg: TActorMessage);
   protected
     Environment: TActorEnvironment;
@@ -279,6 +282,13 @@ type
     procedure TestSpawnThunk;
   end;
 
+  TestTActorEnvironment = class(TActorTestCase)
+  private
+    procedure CheckForLink(LinkingPID, LinkedPID, Msg: String);
+  published
+    procedure TestLinkNotification;
+  end;
+
 const
   TenthOfASecond = 100;
   TestName       = 'test';
@@ -319,22 +329,6 @@ var
 
 const
   QuarterSecond = 500;
-
-procedure LogEntry(LogName: String;
-                   Description: String;
-                   SourceRef: Cardinal;
-                   SourceDesc: String;
-                   Severity: Cardinal;
-                   EventRef: Cardinal;
-                   DebugInfo: String);
-begin
-  Lock.Acquire;
-  try
-    Log.Add(TLogEntry.Create(LogName, Description, SourceRef, SourceDesc, Severity, EventRef, DebugInfo));
-  finally
-    Lock.Release;
-  end;
-end;
 
 function CreateLogFile(Lock: TCriticalSection; Log: TObjectList): TStrings;
 var
@@ -385,6 +379,22 @@ begin
   end;
 end;
 
+procedure LogEntry(LogName: String;
+                   Description: String;
+                   SourceRef: Cardinal;
+                   SourceDesc: String;
+                   Severity: Cardinal;
+                   EventRef: Cardinal;
+                   DebugInfo: String);
+begin
+  Lock.Acquire;
+  try
+    Log.Add(TLogEntry.Create(LogName, Description, SourceRef, SourceDesc, Severity, EventRef, DebugInfo));
+  finally
+    Lock.Release;
+  end;
+end;
+
 procedure NotifyOfActorCreation(ActorType, PID, UnusedEvent: String);
 begin
   LogEntry('debug', Format(ActorCreatedMsg, [PID, ActorType]), 0, 'Ikaria', 0, 0, '');
@@ -398,6 +408,19 @@ begin
   try
     if Assigned(RunningTestCase) then
       RunningTestCase.NotifyOfExit(PID, ExitReason);
+  finally
+    TestLock.Release;
+  end;
+end;
+
+procedure NotifyOfActorLink(LinkingPID, LinkedPID: String);
+begin
+  LogEntry('debug', Format(ActorLinkedMsg, [LinkingPID, LinkedPID]), 0, 'Ikaria', 0, 0, '');
+
+  TestLock.Acquire;
+  try
+    if Assigned(RunningTestCase) then
+      RunningTestCase.NotifyOfLink(LinkingPID, LinkedPID);
   finally
     TestLock.Release;
   end;
@@ -428,6 +451,7 @@ begin
   Result.AddSuite(TestTActorMessageTable.Suite);
   Result.AddSuite(TestTActor.Suite);
   Result.AddSuite(TestActorFunctions.Suite);
+  Result.AddSuite(TestTActorEnvironment.Suite);
 end;
 
 //******************************************************************************
@@ -1571,9 +1595,11 @@ begin
 
   Self.Environment := TThreadedActorEnvironment.Create;
   Self.ExitEvent   := TSimpleEvent.Create;
+  Self.LinkEvent   := TSimpleEvent.Create;
   Self.MsgEvent    := TSimpleEvent.Create;
 
   OnActorCreatedHook := NotifyOfActorCreation;
+  OnActorLinkedHook  := NotifyOfActorLink;
   OnActorExitedHook  := NotifyOfActorExit;
   OnMessageSentHook  := StoreLastSentMessageInTestCase;
 
@@ -1587,6 +1613,7 @@ begin
   end;
 
   Self.ActorExited  := false;
+  Self.ActorLinked  := false;
 end;
 
 procedure TActorTestCase.TearDown;
@@ -1600,6 +1627,8 @@ begin
   end;
 
   Self.MsgEvent.Free;
+  Self.LinkEvent.Free;
+  
   Self.ExitEvent.Free;
   Self.Environment.Free;
 
@@ -1656,6 +1685,12 @@ procedure TActorTestCase.NotifyOfExit(PID: String; Reason: TTuple);
 begin
   Self.ActorExited := true;
   Self.ExitEvent.SetEvent;
+end;
+
+procedure TActorTestCase.NotifyOfLink(LinkingPID, LinkedPID: String);
+begin
+  Self.ActorLinked := true;
+  Self.LinkEvent.SetEvent;
 end;
 
 procedure TActorTestCase.StoreLastSentMessage(Sender, Target: TProcessID; Msg: TActorMessage);
@@ -1904,6 +1939,38 @@ procedure TestActorFunctions.TestSpawnThunk;
 begin
   Spawn(Self.TestThunk);
   Self.WaitFor(Self.ThunkEvent, OneSecond, 'Thunk didn''t run');
+end;
+
+//******************************************************************************
+//* TestTActorEnvironment                                                      *
+//******************************************************************************
+//* TestTActorEnvironment Private methods **************************************
+
+procedure TestTActorEnvironment.CheckForLink(LinkingPID, LinkedPID, Msg: String);
+begin
+  Self.WaitFor(Self.LinkEvent, OneSecond, Msg);
+  Check(Self.ActorLinked, Msg + ' (Link notification not received)');
+end;
+
+//* TestTActorEnvironment Published methods ************************************
+
+procedure TestTActorEnvironment.TestLinkNotification;
+var
+  A, B: TActor;
+begin
+  A := TActor.Create(Self.Environment, TActor.RootActor);
+  try
+    B := TActor.Create(Self.Environment, TActor.RootActor);
+    try
+      A.Link(B.PID);
+
+      CheckForLink(A.PID, B.PID, 'Link not logged');
+    finally
+      B.Free;
+    end;
+  finally
+    A.Free;
+  end;
 end;
 
 initialization;
