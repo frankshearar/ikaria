@@ -476,7 +476,6 @@ end;
 
 procedure TErrorActor.Step;
 begin
-  Self.Terminate;
   raise Self.ExceptionType.Create(Self.ExceptionReason);
 end;
 
