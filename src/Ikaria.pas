@@ -1320,6 +1320,8 @@ begin
   Self.PendingMsgs := 0;
 
   Self.Mailbox.OnMessageArrived := Self.NewMessageArrived;
+
+  NotifyOfActorCreation(Self.ClassName, Self.PID);
 end;
 
 destructor TActorInterface.Destroy;
@@ -1604,8 +1606,6 @@ begin
   Self.MsgTable := TActorMessageTable.Create;
   Self.RegisterRequiredActions(Self.MsgTable);
   Self.RegisterActions(Self.MsgTable);
-
-  NotifyOfActorCreation(Self.ClassName, Self.PID);
 end;
 
 destructor TActor.Destroy;
