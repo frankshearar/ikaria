@@ -24,7 +24,8 @@ unit Ikaria;
 
   Note that you, as implementor of an Actor, need to exercise caution. You can
   easily write a malicious Actor that sits in a tight loop, starving the
-  processor. The framework doesn't protect you from rabbit-bombing yourself.
+  processor (and preventing a clean shutdown of the Environment). The framework
+  doesn't protect you from rabbit-bombing yourself.
 
   Currently, the framework runs each Actor in its own, transient, thread.
 
