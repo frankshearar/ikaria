@@ -150,7 +150,7 @@ type
 
   // The base class of all standard messages in Ikaria, MessageTuples look like
   // this:
-  //   ("msg-name" {reply-to-pid} (some tuple of paramters))
+  //   ("msg-name" {reply-to-pid} (some tuple of parameters))
   TMessageTuple = class(TTuple)
   private
     function GetMessageName: String;
