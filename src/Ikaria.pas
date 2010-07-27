@@ -121,6 +121,18 @@ type
     property Value: String read fValue;
   end;
 
+  TClassTerm = class(TTerm)
+  private
+    fValue: TClass;
+  public
+    constructor Create(Value: TClass);
+
+    function AsString: String; override;
+    function Equals(Other: TTerm): Boolean; override;
+
+    property Value: TClass read fValue;
+  end;
+
   TTupleClass = class of TTuple;
 
   TTuple = class(TTerm)
@@ -839,6 +851,29 @@ end;
 function TStringTerm.IsString: Boolean;
 begin
   Result := true;
+end;
+
+//******************************************************************************
+//* TClassTerm                                                                 *
+//******************************************************************************
+//* TClassTerm Public methods **************************************************
+
+constructor TClassTerm.Create(Value: TClass);
+begin
+  inherited Create;
+
+  Self.fValue := Value;
+end;
+
+function TClassTerm.AsString: String;
+begin
+  Result := Self.Value.ClassName;
+end;
+
+function TClassTerm.Equals(Other: TTerm): Boolean;
+begin
+  Result := inherited Equals(Other) and
+            (Self.Value = TClassTerm(Other).Value);
 end;
 
 //******************************************************************************
