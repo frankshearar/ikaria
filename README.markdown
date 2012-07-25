@@ -22,3 +22,34 @@ TODO:
 * Should receiving exits be pushed into the primitive layer? Right now it's possible to have a badly- or maliciously-written Actor refuse to terminate because it never processes an exit message.
 * Parallel map: take an array and a function to be applied to each element in the array, and fork/join the processing, a la mapreduce.
 * "Futures"?
+
+LICENCE:
+--------
+
+Copyright (C) 2008-2010 Royal National Institute for Deaf People (RNID).
+
+You may redistribute or use the source or binary code with or without
+modification providing you abide by the following restrictions:-
+
+1.  You MUST distribute this agreement with any source or binary
+    distribution.  This license will also apply to any third party who
+    receives the software from you.
+
+2.  You MUST acknowledge the use of RNID code in any advertising material
+    used to advertise ANY product or service that is derived from or
+    makes use of the code.
+
+3.  You MUST acknowledge the use of RNID code on splash screens, in
+    "about" boxes and any other location where there is a copyright
+    notice.
+
+4.  You may NOT use the name of the RNID in any other way, in relation
+    to a product or service that is derived from or makes use of the
+    code except with permission, in writing from the RNID.
+
+5.  You must NOT use this software or parts thereof to build products
+    or services that do not provide deaf, hard of hearing and speech
+    impaired people with equivalent service to hearing people.  In
+    particular you may not use this software to build voice-only systems.
+
+THIS SOFTWARE IS OFFERED FREELY AND ENTIRELY WITHOUT WARRANTY.
